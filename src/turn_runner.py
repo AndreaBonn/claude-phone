@@ -5,7 +5,7 @@ from typing import Any
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
-from src.bridge_context import BridgeContext
+from src.bridge_context import BridgeContext, ChoiceSet
 from src.claude_session import ClaudeCrashedError, ClaudeTimeoutError, EventCallback
 from src.message_formatter import describe_event, extract_choices, truncate
 from src.project_manager import SandboxError
@@ -31,9 +31,11 @@ class TurnRequest:
     text: str
 
 
-def choice_keyboard(bridge: BridgeContext, options: list[str]) -> InlineKeyboardMarkup:
+def choice_keyboard(
+    bridge: BridgeContext, project: str, options: list[str]
+) -> InlineKeyboardMarkup:
     token = secrets.token_hex(4)
-    bridge.choices[token] = options
+    bridge.choices[token] = ChoiceSet(project=project, labels=options)
     rows = [
         [InlineKeyboardButton(label, callback_data=f"{CHOICE_PREFIX}:{token}:{index}")]
         for index, label in enumerate(options)
@@ -72,36 +74,56 @@ def _answer_text(outcome: TurnOutcome) -> tuple[str, list[str]]:
     return text, options
 
 
+def _verbosity(bridge: BridgeContext, request: TurnRequest) -> int:
+    return bridge.store.get_verbose(request.user_id, default=bridge.settings.verbose_level)
+
+
 async def run_user_turn(bridge: BridgeContext, bot: Any, request: TurnRequest) -> None:
     """Forward one user message to Claude and relay progress and answer to Telegram.
 
-    This is the Telegram boundary of a turn: every failure ends with an explicit
-    message to the user, never with a progress message stuck on 'working'.
+    This is the Telegram boundary of a turn: every failure, Telegram ones
+    included, is logged and audited, and the user gets an explicit message
+    whenever Telegram is reachable.
     """
-    project, chat_id = request.project, request.chat_id
-    verbose = bridge.store.get_verbose(request.user_id, default=bridge.settings.verbose_level)
-    if bridge.sessions.is_busy(project):
-        await send_text(bot, chat_id, QUEUED_NOTICE)
-    bridge.presenter.project_chats[project] = chat_id
+    project = request.project
+    bridge.presenter.project_chats[project] = request.chat_id
     bridge.store.record_audit(
         event="prompt",
         project=project,
         detail=truncate(request.text, AUDIT_DETAIL_MAX),
         user_id=request.user_id,
     )
-    progress = await ProgressMessage.create(bot, chat_id, f"⏳ {project}: sto lavorando…")
+    progress: ProgressMessage | None = None
     try:
-        bridge.choices.clear()
-        outcome = await bridge.sessions.run_turn(
-            project, request.text, _progress_callback(progress, verbose)
+        if bridge.sessions.is_busy(project):
+            await send_text(bot, request.chat_id, QUEUED_NOTICE)
+        progress = await ProgressMessage.create(
+            bot, request.chat_id, f"⏳ {project}: sto lavorando…"
         )
+        bridge.forget_choices(project)
+        on_event = _progress_callback(progress, _verbosity(bridge, request))
+        outcome = await bridge.sessions.run_turn(project, request.text, on_event)
     except Exception as exc:  # turn boundary: report every failure to the user
-        logger.exception("Turn failed for project %s", project)
-        bridge.store.record_audit(event="turn-error", project=project, detail=repr(exc))
-        await progress.finish(f"❌ {project}: interrotto")
-        await send_text(bot, chat_id, _failure_text(project, exc))
+        await _report_failure(bridge, bot, request, progress, exc)
         return
-    await _deliver(bridge, bot, request, progress, outcome, verbose)
+    await _deliver(bridge, bot, request, progress, outcome)
+
+
+async def _report_failure(
+    bridge: BridgeContext,
+    bot: Any,
+    request: TurnRequest,
+    progress: ProgressMessage | None,
+    exc: Exception,
+) -> None:
+    logger.exception("Turn failed for project %s", request.project, exc_info=exc)
+    bridge.store.record_audit(event="turn-error", project=request.project, detail=repr(exc))
+    try:
+        if progress is not None:
+            await progress.finish(f"❌ {request.project}: interrotto")
+        await send_text(bot, request.chat_id, _failure_text(request.project, exc))
+    except Exception:
+        logger.exception("Could not report the failure to Telegram either")
 
 
 async def _deliver(
@@ -110,13 +132,12 @@ async def _deliver(
     request: TurnRequest,
     progress: ProgressMessage,
     outcome: TurnOutcome,
-    verbose: int,
 ) -> None:
     text, options = _answer_text(outcome)
-    if verbose == 0:
+    if _verbosity(bridge, request) == 0:
         await progress.delete()
     else:
         status = "⚠️" if outcome.result.is_error else "✅"
         await progress.finish(f"{status} {request.project}: completato")
-    keyboard = choice_keyboard(bridge, options) if options else None
+    keyboard = choice_keyboard(bridge, request.project, options) if options else None
     await send_text(bot, request.chat_id, text, reply_markup=keyboard)

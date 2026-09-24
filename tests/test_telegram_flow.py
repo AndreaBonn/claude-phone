@@ -79,7 +79,7 @@ async def test_turn_renders_choices_as_buttons(bridge: BridgeContext, bot: FakeB
     assert answer.text == "echo: Pick one"
     labels = [row[0].text for row in answer.reply_markup.inline_keyboard]
     assert labels == ["SQLite", "Postgres"]
-    assert list(bridge.choices.values()) == [["SQLite", "Postgres"]]
+    assert [c.labels for c in bridge.choices.values()] == [["SQLite", "Postgres"]]
 
 
 async def test_crashed_turn_is_reported_not_left_working(
@@ -163,3 +163,46 @@ def test_build_application_registers_guard_first(bridge: BridgeContext) -> None:
     assert isinstance(app.handlers[-1][0], TypeHandler)
     assert len(app.handlers[0]) == 10
     app.bot_data[BRIDGE_KEY].store.close()
+
+
+class BrokenBot(FakeBot):
+    async def send_message(self, *args: Any, **kwargs: Any) -> Any:
+        from telegram.error import Forbidden
+
+        raise Forbidden("bot was blocked by the user")
+
+
+async def test_turn_survives_telegram_failure_on_progress(bridge: BridgeContext) -> None:
+    await run_user_turn(bridge, BrokenBot(), turn("hello"))
+    assert bridge.store.recent_audit(limit=1)[0].event == "turn-error"
+
+
+async def test_choice_button_goes_to_its_own_project(bridge: BridgeContext, bot: FakeBot) -> None:
+    await run_user_turn(bridge, bot, turn("Pick\n[[option: Keep A]]"))
+    button = bot.messages[-1].reply_markup.inline_keyboard[0][0].callback_data
+    await switch_project(bridge, USER, "beta")
+    update, context, _ = callback(bridge, bot, button)
+    await callbacks.handle_choice(update, context)
+    await bridge.sessions.stop_all()
+    assert bridge.store.recent_audit(limit=1)[0].project == "alpha"
+    assert bot.messages[-1].text == "echo: Keep A"
+
+
+async def test_turn_on_other_project_keeps_existing_choices(
+    bridge: BridgeContext, bot: FakeBot
+) -> None:
+    await run_user_turn(bridge, bot, turn("Pick\n[[option: Keep A]]"))
+    other = TurnRequest(chat_id=USER, user_id=USER, project="beta", text="hi")
+    await run_user_turn(bridge, bot, other)
+    await bridge.sessions.stop_all()
+    assert len(bridge.choices) == 1
+
+
+async def test_malformed_callback_data_is_answered(bridge: BridgeContext, bot: FakeBot) -> None:
+    for data, handler in [
+        ("ap:broken", callbacks.handle_approval),
+        ("ch:x", callbacks.handle_choice),
+    ]:
+        update, context, query = callback(bridge, bot, data)
+        await handler(update, context)
+        assert query.answers, data

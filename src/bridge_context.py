@@ -11,6 +11,14 @@ from src.telegram_presenter import TelegramApprovalPresenter
 BRIDGE_KEY = "bridge"
 
 
+@dataclass(frozen=True)
+class ChoiceSet:
+    """Choice buttons under one answer, bound to the project that produced them."""
+
+    project: str
+    labels: list[str]
+
+
 @dataclass
 class BridgeContext:
     """Everything the Telegram handlers need, stored in `application.bot_data`."""
@@ -21,8 +29,12 @@ class BridgeContext:
     sessions: SessionManager
     broker: ApprovalBroker
     presenter: TelegramApprovalPresenter
-    # Choice buttons of the latest answer: token -> labels. Cleared at every turn.
-    choices: dict[str, list[str]] = field(default_factory=dict)
+    # Open choice buttons: token -> choices. A new turn invalidates its project's ones.
+    choices: dict[str, ChoiceSet] = field(default_factory=dict)
+
+    def forget_choices(self, project: str) -> None:
+        for token in [t for t, choice in self.choices.items() if choice.project == project]:
+            del self.choices[token]
 
 
 def get_bridge(context: Any) -> BridgeContext:

@@ -15,6 +15,13 @@ logger = logging.getLogger(__name__)
 
 EXPIRED = "Richiesta scaduta o già gestita"
 STALE_CHOICE = "Scelta non più valida"
+INVALID_BUTTON = "Bottone non valido"
+
+
+def _parse(data: str | None, parts: int) -> list[str] | None:
+    """Split `prefix:a:b` callback data; None if it does not have `parts` fields."""
+    fields = (data or "").split(":", maxsplit=parts - 1)
+    return fields if len(fields) == parts and all(fields) else None
 
 
 async def _drop_buttons(update: Update) -> None:
@@ -30,13 +37,12 @@ async def handle_approval(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     """`ap:<id>:<decision>` — the user's answer to a permission prompt."""
     bridge = get_bridge(context)
     query = update.callback_query
-    assert query is not None and query.data is not None
-    _, approval_id, raw_decision = query.data.split(":", maxsplit=2)
-    try:
-        decision = ApprovalDecision(raw_decision)
-    except ValueError:
-        await query.answer("Azione sconosciuta")
+    assert query is not None
+    fields = _parse(query.data, parts=3)
+    if fields is None or fields[2] not in set(ApprovalDecision):
+        await query.answer(INVALID_BUTTON)
         return
+    approval_id, decision = fields[1], ApprovalDecision(fields[2])
     if bridge.broker.resolve(approval_id, decision) is None:
         await query.answer(EXPIRED)
         await _drop_buttons(update)
@@ -50,16 +56,19 @@ async def handle_choice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     bridge = get_bridge(context)
     query = update.callback_query
     user = update.effective_user
-    assert query is not None and query.data is not None and user is not None
-    _, token, raw_index = query.data.split(":", maxsplit=2)
-    labels = bridge.choices.pop(token, None)
-    project = bridge.store.get_active_project(user.id)
-    valid_index = raw_index.isdigit() and labels is not None and int(raw_index) < len(labels)
-    if labels is None or project is None or not valid_index:
+    assert query is not None and user is not None
+    fields = _parse(query.data, parts=3)
+    choice = bridge.choices.pop(fields[1], None) if fields else None
+    if fields is None or choice is None or not fields[2].isdigit():
         await query.answer(STALE_CHOICE)
         await _drop_buttons(update)
         return
-    label = labels[int(raw_index)]
+    index = int(fields[2])
+    if index >= len(choice.labels):
+        await query.answer(STALE_CHOICE)
+        return
+    # The answer belongs to the project that asked, even after a /switch.
+    project, label = choice.project, choice.labels[index]
     await query.answer(f"➡️ {label}")
     await _drop_buttons(update)
     chat_id = query.message.chat.id if query.message is not None else user.id
@@ -72,8 +81,12 @@ async def handle_project_pick(update: Update, context: ContextTypes.DEFAULT_TYPE
     bridge = get_bridge(context)
     query = update.callback_query
     user = update.effective_user
-    assert query is not None and query.data is not None and user is not None
-    name = query.data.split(":", maxsplit=1)[1]
+    assert query is not None and user is not None
+    fields = _parse(query.data, parts=2)
+    if fields is None:
+        await query.answer(INVALID_BUTTON)
+        return
+    name = fields[1]
     try:
         reply = await switch_project(bridge, user.id, name)
     except SandboxError as exc:
