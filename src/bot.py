@@ -21,7 +21,7 @@ from telegram.ext import (
 from src.auth import build_auth_guard
 from src.bridge_context import BRIDGE_KEY, BridgeContext
 from src.claude_session import SYSTEM_PROMPT_PATH, SessionConfig
-from src.config import PROJECT_ROOT, Settings
+from src.config import PROJECT_ROOT, Settings, format_config_error
 from src.handlers import callbacks, commands, messages
 from src.logging_setup import setup_logging
 from src.message_formatter import summarize_tool_input, truncate
@@ -184,7 +184,7 @@ def main() -> int:
     try:
         settings = Settings()
     except ValidationError as exc:
-        print(f"Configurazione non valida (.env):\n{exc}", file=sys.stderr)
+        print(f"Configurazione non valida (.env):\n{format_config_error(exc)}", file=sys.stderr)
         return 2
     secrets = [settings.telegram_bot_token.get_secret_value()]
     if settings.anthropic_api_key:
@@ -197,6 +197,11 @@ def main() -> int:
         app.run_polling(
             drop_pending_updates=True, allowed_updates=[Update.MESSAGE, Update.CALLBACK_QUERY]
         )
+    except Exception:
+        # Logged through the redacting formatter: a raw traceback on stderr
+        # would print the bot token contained in InvalidToken.
+        logger.exception("Bot stopped because of an unrecoverable error")
+        return 1
     finally:
         lock.close()
     return 0

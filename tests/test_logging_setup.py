@@ -22,3 +22,17 @@ def test_setup_logging_redacts_secrets_in_messages_and_args(tmp_path: Path) -> N
 def test_setup_logging_silences_httpx_info(tmp_path: Path) -> None:
     setup_logging(level="DEBUG", secrets=[], log_file=tmp_path / "b.log")
     assert logging.getLogger("httpx").getEffectiveLevel() == logging.WARNING
+
+
+def test_setup_logging_redacts_secrets_in_tracebacks(tmp_path: Path) -> None:
+    log_file = tmp_path / "t.log"
+    setup_logging(level="INFO", secrets=["123:SECRET"], log_file=log_file)
+    try:
+        raise ValueError("The token `123:SECRET` was rejected by the server.")
+    except ValueError:
+        logging.getLogger("test.traceback").exception("startup failed")
+    for handler in logging.getLogger().handlers:
+        handler.flush()
+    content = log_file.read_text()
+    assert "123:SECRET" not in content
+    assert "The token `***` was rejected" in content
