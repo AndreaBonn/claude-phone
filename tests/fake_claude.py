@@ -45,6 +45,10 @@ def main() -> None:
         if scenario == "crash":
             sys.stderr.write("boom: simulated crash\n")
             sys.exit(3)
+        if scenario == "noisy":
+            # One huge stderr line with no newline, bigger than a pipe buffer.
+            sys.stderr.write("x" * 300_000)
+            sys.stderr.flush()
         if scenario == "hang":
             time.sleep(60)
         emit(

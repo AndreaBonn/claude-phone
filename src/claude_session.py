@@ -19,6 +19,8 @@ HOOK_SCRIPT = PROJECT_ROOT / "src" / "permission_hook.py"
 SYSTEM_PROMPT_PATH = PROJECT_ROOT / "prompts" / "telegram-bridge-system-v1.md"
 STREAM_LIMIT = 16 * 1024 * 1024
 STDERR_TAIL_LINES = 20
+STDERR_CHUNK = 65536
+STDERR_LINE_MAX = 2000
 STOP_GRACE_SECONDS = 5.0
 # The hook must outlive the approval wait, and Claude must outlive the hook.
 HOOK_TIMEOUT_MARGIN = 30
@@ -186,12 +188,22 @@ class ClaudeSession:
 
     async def _drain_stderr(self, process: asyncio.subprocess.Process) -> None:
         # An unread stderr pipe fills up and freezes the child: always drain it.
+        # Fixed-size reads, not readline: a line longer than the stream limit
+        # would raise and silently stop the drain.
         assert process.stderr is not None
-        async for raw in process.stderr:
-            line = raw.decode(errors="replace").rstrip()
-            if line:
-                self._stderr_tail.append(line)
-                logger.debug("claude[%s] stderr: %s", self.project, line)
+        pending = ""
+        while chunk := await process.stderr.read(STDERR_CHUNK):
+            *lines, pending = (pending + chunk.decode(errors="replace")).split("\n")
+            pending = pending[-STDERR_LINE_MAX:]
+            for line in lines:
+                self._record_stderr(line)
+        self._record_stderr(pending)
+
+    def _record_stderr(self, line: str) -> None:
+        line = line.rstrip()[:STDERR_LINE_MAX]
+        if line:
+            self._stderr_tail.append(line)
+            logger.debug("claude[%s] stderr: %s", self.project, line)
 
     async def _next_line(self, process: asyncio.subprocess.Process) -> bytes:
         assert process.stdout is not None

@@ -178,3 +178,14 @@ def test_build_command_never_skips_permissions(tmp_path: Path) -> None:
     hooks = json.loads(command[command.index("--settings") + 1])["hooks"]["PreToolUse"]
     assert hooks[0]["matcher"] == "*"
     assert hooks[0]["hooks"][0]["timeout"] > 300
+
+
+async def test_huge_stderr_line_does_not_block_the_child(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("FAKE_SCENARIO", "noisy")
+    monkeypatch.setattr("src.claude_session.STREAM_LIMIT", 64 * 1024)
+    harness = Harness(tmp_path, idle_timeout=3.0)
+    outcome = await harness.manager.run_turn("alpha", "hi", harness.on_event)
+    await harness.manager.stop_all()
+    assert outcome.result.text == "echo: hi"
