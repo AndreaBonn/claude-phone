@@ -70,12 +70,22 @@ class ProjectManager:
         self._roots = {root.name: root for root in sandbox.roots}
 
     def list_projects(self) -> list[str]:
-        return [
+        # Same check as resolve_project, so every listed project can be selected
+        # (a symlink to a nested directory would otherwise show a dead button).
+        candidates = (
             f"{root.name}{PROJECT_SEPARATOR}{entry.name}"
             for root in self.sandbox.roots
             for entry in sorted(root.iterdir())
-            if entry.is_dir() and not entry.name.startswith(".") and self.sandbox.contains(entry)
-        ]
+            if not entry.name.startswith(".")
+        )
+        return [project_id for project_id in candidates if self._is_selectable(project_id)]
+
+    def _is_selectable(self, project_id: str) -> bool:
+        try:
+            self.resolve_project(project_id)
+        except SandboxError:
+            return False
+        return True
 
     def resolve_project(self, project_id: str) -> Path:
         root_name, _, name = project_id.partition(PROJECT_SEPARATOR)

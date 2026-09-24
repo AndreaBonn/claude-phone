@@ -105,3 +105,24 @@ def test_read_only_dirs_are_readable_but_not_writable(base: Path) -> None:
     assert sandbox.resolve(raw=str(skills / "x.md"), cwd=cwd, read_only_ok=True) == skills / "x.md"
     with pytest.raises(SandboxError):
         sandbox.resolve(raw=str(skills / "x.md"), cwd=cwd)
+
+
+def test_resolve_project_rejects_a_symlink_to_a_nested_directory(
+    sandbox: Sandbox, base: Path
+) -> None:
+    (base / "Progetti" / "alpha" / "inner").mkdir()
+    (base / "Progetti" / "shortcut").symlink_to(base / "Progetti" / "alpha" / "inner")
+    with pytest.raises(SandboxError, match="non valido"):
+        ProjectManager(sandbox).resolve_project("Progetti/shortcut")
+
+
+def test_list_projects_hides_entries_that_cannot_be_selected(
+    sandbox: Sandbox, base: Path
+) -> None:
+    (base / "Progetti" / "alpha" / "inner").mkdir()
+    (base / "Progetti" / "shortcut").symlink_to(base / "Progetti" / "alpha" / "inner")
+    projects = ProjectManager(sandbox)
+    listed = projects.list_projects()
+    assert "Progetti/shortcut" not in listed
+    for project_id in listed:
+        projects.resolve_project(project_id)
