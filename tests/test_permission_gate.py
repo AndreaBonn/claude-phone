@@ -215,14 +215,19 @@ async def test_hook_end_to_end_stop_sets_continue_false(root: Path, socket_path:
     assert output["continue"] is False
 
 
-async def test_hook_end_to_end_passthrough_prints_nothing(root: Path, socket_path: Path) -> None:
-    broker, _, _ = make_broker(root, FakePresenter())
+async def test_hook_end_to_end_unlisted_mcp_tool_needs_approval(
+    root: Path, socket_path: Path
+) -> None:
+    presenter = FakePresenter(answer=ApprovalDecision.DENY)
+    broker, audit, _ = make_broker(root, presenter)
     await broker.start(socket_path)
     try:
-        stdout = await run_hook(socket_path, root, "TodoWrite", {"todos": []})
+        stdout = await run_hook(socket_path, root, "mcp__aws__call", {"cli": "aws s3 rm"})
     finally:
         await broker.stop()
-    assert stdout == ""
+    assert decision_of(stdout) == "deny"
+    assert [request.tool_name for request in presenter.shown] == ["mcp__aws__call"]
+    assert audit[0][1] == "mcp__aws__call"
 
 
 async def test_hook_denies_when_bridge_is_down(root: Path, socket_path: Path) -> None:

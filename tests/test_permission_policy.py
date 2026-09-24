@@ -92,8 +92,22 @@ def test_unparseable_bash_asks_with_warning(policy: GatePolicy) -> None:
     assert verdict.reason == UNPARSEABLE_BASH_WARNING
 
 
-def test_unknown_tool_is_passed_through(policy: GatePolicy) -> None:
-    assert classify(policy, "TodoWrite", {"todos": []}) is GateAction.PASSTHROUGH
+def test_internal_bookkeeping_tool_is_allowed(policy: GatePolicy) -> None:
+    assert classify(policy, "TodoWrite", {"todos": []}) is GateAction.ALLOW
+
+
+@pytest.mark.parametrize(
+    ("tool", "tool_input"),
+    [
+        ("mcp__firebase__deploy", {"project": "prod"}),
+        ("WebFetch", {"url": "https://example.com"}),
+        ("NotebookEdit", {"notebook_path": "n.ipynb", "new_source": "x"}),
+    ],
+)
+def test_unlisted_tools_require_approval(
+    policy: GatePolicy, tool: str, tool_input: dict[str, Any]
+) -> None:
+    assert classify(policy, tool, tool_input) is GateAction.ASK
 
 
 def test_cwd_outside_sandbox_blocks_everything(policy: GatePolicy, tmp_path: Path) -> None:

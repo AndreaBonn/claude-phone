@@ -173,6 +173,7 @@ def test_build_command_never_skips_permissions(tmp_path: Path) -> None:
     command = build_command(config, session_id="abc")
     assert not any("dangerously" in part for part in command)
     assert command[command.index("--permission-mode") + 1] == "default"
+    assert "--strict-mcp-config" in command
     assert command[-2:] == ["--resume", "abc"]
     hooks = json.loads(command[command.index("--settings") + 1])["hooks"]["PreToolUse"]
     assert hooks[0]["matcher"] == "*"

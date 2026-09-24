@@ -78,6 +78,9 @@ def build_command(config: SessionConfig, session_id: str | None) -> list[str]:
         ",".join(config.allowed_tools),
         "--permission-mode",
         "default",
+        # No --mcp-config is passed: the user's MCP servers (cloud consoles,
+        # production APIs) are not reachable from a phone-driven session.
+        "--strict-mcp-config",
         "--settings",
         build_hook_settings(config),
         "--append-system-prompt",

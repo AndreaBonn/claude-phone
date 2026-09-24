@@ -13,6 +13,9 @@ GLOB_CHARS = re.compile(r"[*?\[{]")
 # Redirection targets that are harmless even though they live outside the sandbox.
 BASH_SAFE_PATHS = frozenset({"/dev/null", "/dev/stdout", "/dev/stderr", "/dev/stdin"})
 _REDIRECT_PREFIX = re.compile(r"^\d*[<>]+&?")
+# Bookkeeping tools with no effect outside Claude's own state; subagent tool
+# calls are gated by the same hook, so spawning one is harmless on its own.
+NO_EFFECT_TOOLS = frozenset({"TodoWrite", "Task", "Agent", "ExitPlanMode"})
 UNPARSEABLE_BASH_WARNING = "⚠️ Comando non analizzabile automaticamente: controllalo a mano"
 
 
@@ -20,7 +23,6 @@ class GateAction(StrEnum):
     ALLOW = "allow"
     ASK = "ask"
     BLOCK = "block"
-    PASSTHROUGH = "passthrough"
 
 
 @dataclass(frozen=True)
@@ -86,6 +88,8 @@ def classify_tool_call(
 
     Sandbox violations win over everything, including auto-approval and the
     user's approval: a path outside APPROVED_DIRECTORY is always blocked.
+    Any tool not explicitly listed (MCP tools, WebFetch, NotebookEdit...) needs
+    the user's approval: nothing falls through to Claude's own permission rules.
     The Bash check is a best-effort token scan, not a sandbox: the real guard
     for shell commands is the human approval that always follows it.
     """
@@ -100,8 +104,6 @@ def classify_tool_call(
     escaped = _outside(paths, cwd=cwd, root=policy.root)
     if escaped is not None:
         return GateVerdict(GateAction.BLOCK, f"Percorso fuori dalla sandbox: {escaped}")
-    if tool_name in policy.auto_approve_tools:
+    if tool_name in policy.auto_approve_tools or tool_name in NO_EFFECT_TOOLS:
         return GateVerdict(GateAction.ALLOW)
-    if tool_name in policy.allowed_tools:
-        return GateVerdict(GateAction.ASK, warning)
-    return GateVerdict(GateAction.PASSTHROUGH)
+    return GateVerdict(GateAction.ASK, warning)

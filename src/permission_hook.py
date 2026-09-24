@@ -19,12 +19,9 @@ READ_CHUNK = 65536
 STOP_REASON = "Sessione fermata dall'utente da Telegram"
 
 
-def build_hook_output(response: dict[str, Any]) -> dict[str, Any] | None:
+def build_hook_output(response: dict[str, Any]) -> dict[str, Any]:
     """Translate the bridge verdict into Claude Code's PreToolUse JSON output."""
-    decision = response.get("decision")
-    if decision == "passthrough":
-        return None
-    permission = "allow" if decision == "allow" else "deny"
+    permission = "allow" if response.get("decision") == "allow" else "deny"
     output: dict[str, Any] = {
         "hookSpecificOutput": {
             "hookEventName": "PreToolUse",
@@ -66,9 +63,7 @@ def main() -> int:
         response = ask_bridge(request, os.environ[SOCKET_ENV], timeout)
     except Exception as exc:  # fail-closed boundary: any error denies the tool
         response = {"decision": "deny", "reason": f"Gate del bridge non raggiungibile: {exc!r}"}
-    output = build_hook_output(response)
-    if output is not None:
-        print(json.dumps(output))
+    print(json.dumps(build_hook_output(response)))
     return 0
 
 

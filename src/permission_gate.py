@@ -137,11 +137,9 @@ class ApprovalBroker:
         verdict = classify_tool_call(
             tool_name=tool, tool_input=tool_input, cwd=cwd, policy=self._policy
         )
-        if verdict.action is GateAction.PASSTHROUGH:
-            return _response("passthrough")
         if verdict.action is GateAction.ALLOW:
             self._record(project, tool, tool_input, "auto-approved", "")
-            return _response("allow", "Auto-approvato (sola lettura)")
+            return _response("allow", "Auto-approvato")
         if verdict.action is GateAction.BLOCK:
             self._record(project, tool, tool_input, "blocked", verdict.reason)
             return _response("deny", verdict.reason)
