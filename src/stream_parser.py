@@ -17,6 +17,13 @@ class TextEvent:
 
 
 @dataclass(frozen=True)
+class ContextEvent:
+    """Text Claude Code injects on the user's side: skill bodies, hook feedback."""
+
+    text: str
+
+
+@dataclass(frozen=True)
 class ToolUseEvent:
     tool_use_id: str
     name: str
@@ -40,7 +47,7 @@ class ResultEvent:
     num_turns: int | None = None
 
 
-StreamEvent = InitEvent | TextEvent | ToolUseEvent | ToolResultEvent | ResultEvent
+StreamEvent = InitEvent | TextEvent | ContextEvent | ToolUseEvent | ToolResultEvent | ResultEvent
 
 
 def _flatten_content(content: Any) -> str:
@@ -53,12 +60,17 @@ def _flatten_content(content: Any) -> str:
     return ""
 
 
-def _parse_blocks(blocks: Any) -> list[StreamEvent]:
+def _parse_blocks(blocks: Any, from_user: bool) -> list[StreamEvent]:
+    if from_user and isinstance(blocks, str):
+        return [ContextEvent(text=blocks)] if blocks.strip() else []
     events: list[StreamEvent] = []
     for block in blocks if isinstance(blocks, list) else []:
         kind = block.get("type") if isinstance(block, dict) else None
         if kind == "text" and block.get("text"):
-            events.append(TextEvent(text=block["text"]))
+            # User-role text is never typed by the user in -p mode: it is
+            # content Claude Code injects, not something Claude said.
+            text = block["text"]
+            events.append(ContextEvent(text=text) if from_user else TextEvent(text=text))
         elif kind == "tool_use":
             events.append(
                 ToolUseEvent(
@@ -107,7 +119,8 @@ def parse_line(line: str | bytes) -> list[StreamEvent]:
     if kind == "system" and payload.get("subtype") == "init":
         return [InitEvent(session_id=str(payload.get("session_id", "")))]
     if kind in ("assistant", "user"):
-        return _parse_blocks((payload.get("message") or {}).get("content"))
+        content = (payload.get("message") or {}).get("content")
+        return _parse_blocks(content, from_user=kind == "user")
     if kind == "result":
         return [_parse_result(payload)]
     return []

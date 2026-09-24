@@ -109,3 +109,11 @@ def test_describe_event_truncates_text_more_at_verbose_one() -> None:
     short = describe_event(long_text, verbose=1)
     full = describe_event(long_text, verbose=2)
     assert short is not None and full is not None and len(short) < len(full)
+
+
+def test_describe_event_shows_injected_context_as_one_line() -> None:
+    from src.stream_parser import ContextEvent
+
+    event = ContextEvent(text="Stop hook feedback:\nSuite rossa\nTraceback ...")
+    assert describe_event(event, verbose=1) == "📎 Stop hook feedback:"
+    assert describe_event(event, verbose=0) is None

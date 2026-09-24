@@ -4,7 +4,13 @@ import re
 from pathlib import PurePath
 from typing import Any
 
-from src.stream_parser import StreamEvent, TextEvent, ToolResultEvent, ToolUseEvent
+from src.stream_parser import (
+    ContextEvent,
+    StreamEvent,
+    TextEvent,
+    ToolResultEvent,
+    ToolUseEvent,
+)
 
 TOOL_EMOJI = {
     "Read": "📖",
@@ -30,6 +36,7 @@ MAX_CHOICES = 8
 CHOICE_LABEL_MAX = 60
 TEXT_PREVIEW_MAX = 300
 TEXT_FULL_MAX = 1500
+CONTEXT_LINE_MAX = 120
 _CHOICE = re.compile(r"^[ \t]*\[\[option:[ \t]*(.+?)[ \t]*\]\][ \t]*$", re.MULTILINE)
 
 
@@ -122,6 +129,9 @@ def describe_event(event: StreamEvent, verbose: int) -> str | None:
         return format_tool_line(name=event.name, tool_input=event.input, verbose=verbose)
     if isinstance(event, TextEvent):
         return f"💬 {truncate(event.text.strip(), limit)}"
+    if isinstance(event, ContextEvent):
+        first_line = event.text.strip().splitlines()[0] if event.text.strip() else ""
+        return f"📎 {truncate(first_line, CONTEXT_LINE_MAX)}" if first_line else None
     if isinstance(event, ToolResultEvent) and event.is_error:
         return f"⚠️ {truncate(event.content.strip(), limit)}"
     return None

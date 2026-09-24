@@ -2,6 +2,7 @@ import json
 from typing import Any
 
 from src.stream_parser import (
+    ContextEvent,
     InitEvent,
     ResultEvent,
     TextEvent,
@@ -84,3 +85,19 @@ def test_parse_line_ignores_noise_and_garbage() -> None:
     assert parse_line("not json at all") == []
     assert parse_line("") == []
     assert parse_line(line({"type": "result"})) != []
+
+
+def test_parse_line_marks_injected_user_text_as_context() -> None:
+    payload = {
+        "type": "user",
+        "message": {
+            "content": [
+                {"type": "text", "text": "Base directory for this skill: /x\n\n# Skill body"},
+                {"type": "tool_result", "tool_use_id": "t1", "content": "ok"},
+            ]
+        },
+    }
+    assert parse_line(line(payload)) == [
+        ContextEvent(text="Base directory for this skill: /x\n\n# Skill body"),
+        ToolResultEvent(tool_use_id="t1", is_error=False, content="ok"),
+    ]
