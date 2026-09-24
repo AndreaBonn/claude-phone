@@ -61,24 +61,35 @@ def acquire_instance_lock() -> TextIO:
     return handle
 
 
-def build_bridge(settings: Settings, bot: Any) -> BridgeContext:
-    store = SessionStore(settings.db_path)
-    projects = ProjectManager(settings.approved_directory)
-    presenter = TelegramApprovalPresenter(bot, store, default_chat_id=min(settings.allowed_users))
-    config = SessionConfig(
+def _session_config(settings: Settings) -> SessionConfig:
+    api_key = settings.anthropic_api_key
+    return SessionConfig(
         claude_command=tuple(shlex.split(settings.claude_bin)),
         allowed_tools=settings.claude_allowed_tools,
         gate_socket=settings.gate_socket_path,
         approval_timeout=settings.approval_timeout_seconds,
         idle_timeout=settings.claude_timeout_seconds,
         system_prompt=SYSTEM_PROMPT_PATH.read_text(encoding="utf-8"),
-        api_key=settings.anthropic_api_key.get_secret_value()
-        if settings.anthropic_api_key
-        else None,
+        api_key=api_key.get_secret_value() if api_key else None,
     )
+
+
+def _gate_policy(settings: Settings) -> GatePolicy:
+    return GatePolicy(
+        root=settings.approved_directory,
+        allowed_tools=frozenset(settings.claude_allowed_tools),
+        auto_approve_tools=frozenset(settings.claude_auto_approve_tools),
+    )
+
+
+def build_bridge(settings: Settings, bot: Any) -> BridgeContext:
+    store = SessionStore(settings.db_path)
+    projects = ProjectManager(settings.approved_directory)
+    presenter = TelegramApprovalPresenter(bot, store, default_chat_id=min(settings.allowed_users))
+    # The session manager and the broker reference each other: late-bound via a list.
     broker_ref: list[ApprovalBroker] = []
     sessions = SessionManager(
-        config=config,
+        config=_session_config(settings),
         store=store,
         projects=projects,
         is_waiting_for_user=lambda project: bool(broker_ref and broker_ref[0].pending(project)),
@@ -90,13 +101,12 @@ def build_bridge(settings: Settings, bot: Any) -> BridgeContext:
         detail = truncate(f"{tool}: {summarize_tool_input(tool, tool_input)}", AUDIT_DETAIL_MAX)
         store.record_audit("tool", project, detail, outcome, reason)
 
-    policy = GatePolicy(
-        root=settings.approved_directory,
-        allowed_tools=frozenset(settings.claude_allowed_tools),
-        auto_approve_tools=frozenset(settings.claude_auto_approve_tools),
-    )
     broker = ApprovalBroker(
-        policy, presenter, settings.approval_timeout_seconds, audit, sessions.request_stop
+        _gate_policy(settings),
+        presenter,
+        settings.approval_timeout_seconds,
+        audit,
+        sessions.request_stop,
     )
     broker_ref.append(broker)
     return BridgeContext(settings, store, projects, sessions, broker, presenter)
