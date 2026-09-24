@@ -10,12 +10,12 @@ from telegram import Update
 
 from src.bot import build_bridge
 from src.bridge_context import BRIDGE_KEY, BridgeContext
-from src.config import Settings
 from src.handlers import callbacks
 from src.handlers.projects import switch_project
 from src.project_manager import SandboxError
 from src.telegram_presenter import RESTART_NOTE
 from src.turn_runner import TurnRequest, run_user_turn
+from tests.conftest import make_isolated_settings
 from tests.fakes import FakeBot
 
 FAKE_CLAUDE = Path(__file__).resolve().parent / "fake_claude.py"
@@ -37,7 +37,7 @@ def bridge(
     (tmp_path / "sandbox" / "alpha").mkdir(parents=True)
     (tmp_path / "sandbox" / "beta").mkdir()
     (tmp_path / "profiles" / "sales").mkdir(parents=True)
-    settings = Settings.model_validate(
+    settings = make_isolated_settings(
         {
             "telegram_bot_token": "1:x",
             "allowed_users": str(USER),

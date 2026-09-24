@@ -4,6 +4,7 @@ import pytest
 from pydantic import ValidationError
 
 from src.config import PROJECT_ROOT, Settings, format_config_error
+from tests.conftest import make_isolated_settings
 
 
 def make_settings(tmp_path: Path, **overrides: object) -> Settings:
@@ -13,8 +14,7 @@ def make_settings(tmp_path: Path, **overrides: object) -> Settings:
         "approved_directory": str(tmp_path),
     }
     values.update(overrides)
-    # model_validate skips env and .env sources, so tests never read real secrets.
-    return Settings.model_validate(values)
+    return make_isolated_settings(values)
 
 
 def test_settings_parses_comma_separated_lists(tmp_path: Path) -> None:
