@@ -7,6 +7,7 @@ Single-user Telegram bot that drives a local `claude -p` process (stream-json in
 ```bash
 uv sync
 uv run pytest
+uv run pytest --cov=src --cov-branch --cov-report=term-missing   # coverage
 uv run ruff check . && uv run ruff format .
 uv run mypy src tests
 ./start.sh [--background]   # manual start only
