@@ -18,13 +18,16 @@ class Sandbox:
 
     roots: tuple[Path, ...]
     excluded: tuple[Path, ...] = ()
+    # Readable but never writable, e.g. the skills and rules of Claude's own config.
+    read_only: tuple[Path, ...] = ()
 
-    def contains(self, path: Path) -> bool:
+    def contains(self, path: Path, read_only_ok: bool = False) -> bool:
         resolved = path.resolve()
-        inside = any(resolved.is_relative_to(root) for root in self.roots)
+        allowed = self.roots + self.read_only if read_only_ok else self.roots
+        inside = any(resolved.is_relative_to(root) for root in allowed)
         return inside and not any(resolved.is_relative_to(ex) for ex in self.excluded)
 
-    def resolve(self, raw: str, cwd: Path) -> Path:
+    def resolve(self, raw: str, cwd: Path, read_only_ok: bool = False) -> Path:
         """Resolve a path from Telegram or Claude and enforce the sandbox.
 
         Parameters
@@ -33,6 +36,8 @@ class Sandbox:
             Path as received: absolute, relative to `cwd`, or starting with `~`.
         cwd : Path
             Directory relative paths are interpreted against.
+        read_only_ok : bool
+            Accept the read-only directories too (for reading tools).
 
         Returns
         -------
@@ -48,7 +53,7 @@ class Sandbox:
         if not candidate.is_absolute():
             candidate = cwd / candidate
         resolved = candidate.resolve()
-        if not self.contains(resolved):
+        if not self.contains(resolved, read_only_ok=read_only_ok):
             raise SandboxError(f"Percorso fuori dalla sandbox: {raw}")
         return resolved
 

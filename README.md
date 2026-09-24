@@ -94,8 +94,8 @@ Tutto il resto che scrivi va a Claude Code nel progetto attivo. Mentre Claude la
 | Strumento | Comportamento |
 |---|---|
 | `Read`, `Grep`, `Glob`, `LS` | Approvati in automatico |
-| `TodoWrite`, `Task`, `Agent`, `ExitPlanMode` | Approvati in automatico: non toccano file né sistema, e gli strumenti usati dai sub-agent passano comunque dal gate |
-| `Bash`, `Edit`, `Write` e qualunque altro strumento (`NotebookEdit`, `WebFetch`, …) | Messaggio con i bottoni `✅ Approva`, `❌ Nega`, `🚫 Nega e stop sessione` |
+| `TodoWrite`, `Task`, `Agent`, `ExitPlanMode`, `Skill`, `ToolSearch` | Approvati in automatico: non toccano file né sistema, e gli strumenti usati dai sub-agent passano comunque dal gate |
+| `Bash`, `Edit`, `Write` e qualunque altro strumento (strumenti MCP, `NotebookEdit`, `WebFetch`, …) | Messaggio con i bottoni `✅ Approva`, `❌ Nega`, `🚫 Nega e stop sessione` |
 | Qualunque percorso fuori dalle radici di `APPROVED_DIRECTORY`, o dentro la cartella del bridge | Bloccato sempre, anche se approveresti |
 
 Se non rispondi entro `APPROVAL_TIMEOUT_SECONDS` l'azione è negata. Se il bot si riavvia con richieste aperte, alla ripartenza le trovi marcate come annullate.
@@ -115,7 +115,7 @@ In modalità headless Claude Code non ha lo strumento `AskUserQuestion`. Il brid
 - **Nessuna porta aperta**: il bot usa il long polling, solo connessioni in uscita.
 - `--dangerously-skip-permissions` non compare in nessun percorso del codice.
 
-- **Niente server MCP**: le sessioni aperte dal bot partono con `--strict-mcp-config`, quindi i server MCP configurati sul PC (console cloud, API di produzione) non sono raggiungibili dal telefono.
+- **Stessa configurazione del PC**: le sessioni caricano rule, `CLAUDE.md`, skill, hook, plugin e server MCP del profilo scelto e della cartella del progetto. Ogni chiamata a uno strumento MCP chiede l'approvazione; per quelli di sola consultazione (per esempio `mcp__context7__query-docs`) aggiungi il nome a `CLAUDE_AUTO_APPROVE_TOOLS`. Le cartelle `skills`, `rules`, `rules-detail`, `agents`, `commands` e `plugins` di `~/.claude` e dei profili sono leggibili ma non modificabili; credenziali e `settings.json` restano fuori.
 - **File privati**: database, log, lock e socket vengono creati leggibili solo dal tuo utente.
 
 Claude Code carica comunque le tue impostazioni utente (`~/.claude/settings.json`), hook compresi: valgono anche per le sessioni aperte dal bot.

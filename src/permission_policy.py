@@ -15,7 +15,10 @@ BASH_SAFE_PATHS = frozenset({"/dev/null", "/dev/stdout", "/dev/stderr", "/dev/st
 _REDIRECT_PREFIX = re.compile(r"^\d*[<>]+&?")
 # Bookkeeping tools with no effect outside Claude's own state; subagent tool
 # calls are gated by the same hook, so spawning one is harmless on its own.
-NO_EFFECT_TOOLS = frozenset({"TodoWrite", "Task", "Agent", "ExitPlanMode"})
+NO_EFFECT_TOOLS = frozenset({"TodoWrite", "Task", "Agent", "ExitPlanMode", "Skill", "ToolSearch"})
+# Tools that may reach the read-only directories: readers, and Bash, which
+# always goes through the user's approval (skills run their own scripts).
+READ_ONLY_OK_TOOLS = frozenset({"Read", "Grep", "Glob", "LS", "Bash"})
 UNPARSEABLE_BASH_WARNING = "⚠️ Comando non analizzabile automaticamente: controllalo a mano"
 
 
@@ -72,10 +75,10 @@ def _bash_paths(command: str) -> list[str] | None:
     return paths
 
 
-def _outside(paths: list[str], cwd: Path, sandbox: Sandbox) -> str | None:
+def _outside(paths: list[str], cwd: Path, sandbox: Sandbox, read_only_ok: bool) -> str | None:
     for raw in paths:
         try:
-            sandbox.resolve(raw=raw, cwd=cwd)
+            sandbox.resolve(raw=raw, cwd=cwd, read_only_ok=read_only_ok)
         except SandboxError:
             return raw
     return None
@@ -102,7 +105,8 @@ def classify_tool_call(
         bash_paths = _bash_paths(str(tool_input.get("command", "")))
         warning = UNPARSEABLE_BASH_WARNING if bash_paths is None else ""
         paths.extend(bash_paths or [])
-    escaped = _outside(paths, cwd=cwd, sandbox=policy.sandbox)
+    read_only_ok = tool_name in READ_ONLY_OK_TOOLS
+    escaped = _outside(paths, cwd=cwd, sandbox=policy.sandbox, read_only_ok=read_only_ok)
     if escaped is not None:
         return GateVerdict(GateAction.BLOCK, f"Percorso fuori dalla sandbox: {escaped}")
     if tool_name in policy.auto_approve_tools or tool_name in NO_EFFECT_TOOLS:

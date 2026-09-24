@@ -31,3 +31,19 @@ def test_config_dir_rejects_unknown_profiles(catalog: ProfileCatalog, name: str)
 
 def test_missing_profiles_dir_offers_only_default(tmp_path: Path) -> None:
     assert ProfileCatalog(tmp_path / "nope").list_profiles() == [DEFAULT_PROFILE]
+
+
+def test_readonly_config_dirs_cover_default_and_profiles(tmp_path: Path) -> None:
+    home_config = tmp_path / "home" / ".claude"
+    (home_config / "skills").mkdir(parents=True)
+    (home_config / "rules").mkdir()
+    (home_config / "projects").mkdir()
+    profiles = tmp_path / "profiles"
+    (profiles / "sales" / "plugins").mkdir(parents=True)
+    (profiles / "sales" / "skills").symlink_to(home_config / "skills")
+    dirs = ProfileCatalog(profiles).readonly_config_dirs(default_config=home_config)
+    assert set(dirs) == {
+        (home_config / "skills").resolve(),
+        (home_config / "rules").resolve(),
+        (profiles / "sales" / "plugins").resolve(),
+    }

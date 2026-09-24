@@ -21,7 +21,9 @@ def root(tmp_path: Path) -> Path:
 @pytest.fixture
 def policy(root: Path) -> GatePolicy:
     return GatePolicy(
-        sandbox=Sandbox(roots=(root,), excluded=(root / "bridge",)),
+        sandbox=Sandbox(
+            roots=(root,), excluded=(root / "bridge",), read_only=(root.parent / "skills",)
+        ),
         allowed_tools=frozenset({"Read", "Grep", "Glob", "Bash", "Edit", "Write"}),
         auto_approve_tools=frozenset({"Read", "Grep", "Glob", "LS"}),
     )
@@ -130,3 +132,24 @@ def test_bridge_directory_is_blocked_even_for_auto_tools(
     policy: GatePolicy, tool: str, tool_input: dict[str, Any]
 ) -> None:
     assert classify(policy, tool, tool_input) is GateAction.BLOCK
+
+
+@pytest.mark.parametrize(
+    ("tool", "tool_input", "expected"),
+    [
+        ("Read", {"file_path": "../../skills/x/SKILL.md"}, GateAction.ALLOW),
+        ("Grep", {"pattern": "a", "path": "../../skills"}, GateAction.ALLOW),
+        ("Bash", {"command": "uv run --script ../../skills/x/run.py"}, GateAction.ASK),
+        ("Edit", {"file_path": "../../skills/x/SKILL.md"}, GateAction.BLOCK),
+        ("Write", {"file_path": "../../skills/new.md", "content": "x"}, GateAction.BLOCK),
+    ],
+)
+def test_claude_config_dirs_are_read_only(
+    policy: GatePolicy, tool: str, tool_input: dict[str, Any], expected: GateAction
+) -> None:
+    assert classify(policy, tool, tool_input) is expected
+
+
+@pytest.mark.parametrize("tool", ["Skill", "ToolSearch"])
+def test_skill_loading_is_allowed(policy: GatePolicy, tool: str) -> None:
+    assert classify(policy, tool, {"skill": "scrivi-italiano"}) is GateAction.ALLOW

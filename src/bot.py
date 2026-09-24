@@ -81,7 +81,10 @@ def _session_config(settings: Settings) -> SessionConfig:
 def _sandbox(settings: Settings) -> Sandbox:
     # The bridge may live inside a root: it is carved out, so Claude can never
     # read or rewrite its own permission gate.
-    return Sandbox(roots=settings.approved_directory, excluded=(PROJECT_ROOT,))
+    # Skills and rules read their own files at runtime: that part of Claude's
+    # config is readable, never writable.
+    read_only = ProfileCatalog(settings.claude_profiles_dir).readonly_config_dirs()
+    return Sandbox(roots=settings.approved_directory, excluded=(PROJECT_ROOT,), read_only=read_only)
 
 
 def _gate_policy(settings: Settings) -> GatePolicy:

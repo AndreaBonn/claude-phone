@@ -17,7 +17,7 @@ uv run mypy src tests
 
 - `bot.py` builds a `BridgeContext` (store, projects, sessions, broker, presenter) into `application.bot_data`; updates run concurrently so approval callbacks are served while a text handler awaits a turn.
 - `claude_session.py`: one long-lived `claude -p --input-format stream-json --output-format stream-json` process per project, turns serialized by an `asyncio.Lock`, stderr always drained, idle timeout paused while an approval is pending.
-- Permission gate: `claude` runs `permission_hook.py` (PreToolUse, matcher `*`, injected via `--settings`), which asks `permission_gate.ApprovalBroker` over a 0600 Unix socket. `permission_policy.classify_tool_call` decides allow / ask / block; there is no passthrough, unlisted tools (MCP, WebFetch, NotebookEdit) ask. Sessions run with `--strict-mcp-config`, so the user's MCP servers are never loaded.
+- Permission gate: `claude` runs `permission_hook.py` (PreToolUse, matcher `*`, injected via `--settings`), which asks `permission_gate.ApprovalBroker` over a 0600 Unix socket. `permission_policy.classify_tool_call` decides allow / ask / block; there is no passthrough, unlisted tools (MCP, WebFetch, NotebookEdit) ask. The user's full config (rules, skills, hooks, plugins, MCP servers) is loaded on purpose: MCP calls ask, and `Sandbox.read_only` exposes the skill/rule/plugin directories of `~/.claude` and of each profile for reading only (`profiles.READABLE_CONFIG_SUBDIRS`).
 - Choice buttons: `AskUserQuestion` does not exist in `-p` mode (measured on Claude Code 2.1.281); `prompts/telegram-bridge-system-v1.md` teaches Claude an `[[option: label]]` line syntax that `message_formatter.extract_choices` turns into buttons.
 
 ## Invariants

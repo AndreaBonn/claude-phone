@@ -95,3 +95,13 @@ def test_sandbox_contains_roots_but_not_their_parent(sandbox: Sandbox, base: Pat
     assert sandbox.contains(base / "Progetti") is True
     assert sandbox.contains(base) is False
     assert sandbox.contains(base / "Personali" / "bridge" / "x") is False
+
+
+def test_read_only_dirs_are_readable_but_not_writable(base: Path) -> None:
+    skills = base / "skills"
+    skills.mkdir()
+    sandbox = Sandbox(roots=(base / "Progetti",), read_only=(skills,))
+    cwd = base / "Progetti" / "alpha"
+    assert sandbox.resolve(raw=str(skills / "x.md"), cwd=cwd, read_only_ok=True) == skills / "x.md"
+    with pytest.raises(SandboxError):
+        sandbox.resolve(raw=str(skills / "x.md"), cwd=cwd)
