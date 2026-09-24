@@ -1,0 +1,21 @@
+# On-demand user unit. It deliberately has no [Install] section, so
+# `systemctl --user enable` refuses it: the bridge must never start by itself.
+#
+# Setup (once): replace /path/to/telegram-claude-bridge below, then
+#   systemctl --user link "$PWD/systemd/telegram-claude-bridge.service"
+# Use:
+#   systemctl --user start telegram-claude-bridge
+#   systemctl --user stop telegram-claude-bridge
+
+[Unit]
+Description=Telegram <-> Claude Code bridge (manual start only)
+
+[Service]
+Type=simple
+WorkingDirectory=/path/to/telegram-claude-bridge
+ExecStart=/path/to/telegram-claude-bridge/start.sh
+# systemd user services get a minimal PATH: add the directories of uv and claude.
+Environment=PATH=%h/.local/bin:%h/.nvm/versions/node/current/bin:/usr/local/bin:/usr/bin:/bin
+KillSignal=SIGTERM
+TimeoutStopSec=45
+Restart=no
