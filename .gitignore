@@ -1,0 +1,17 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Secrets and runtime state
+.env
+data/
+*.pid
+*.sock
+logs/
+
+# Private project spec, kept out of version control on purpose
+assets/telegram-claude-code-bridge-spec.md
