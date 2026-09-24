@@ -1,0 +1,158 @@
+# Telegram ⇄ Claude Code Bridge
+
+Un bot Telegram che ti fa usare dal telefono il Claude Code installato sul tuo PC Linux. Quello che scrivi al bot arriva a Claude Code; quello che Claude Code fa e risponde torna in chat. Quando Claude vuole eseguire un comando o modificare un file, il bot ti chiede il permesso con dei bottoni.
+
+Il bot non parte mai da solo: lo accendi tu con `./start.sh` quando vuoi essere raggiungibile e lo spegni con `./stop.sh`.
+
+Progetto ispirato, per l'architettura, a [RichardAtCT/claude-code-telegram](https://github.com/RichardAtCT/claude-code-telegram), ma scritto da zero con un perimetro più ridotto.
+
+## Requisiti
+
+- Linux, Python 3.11 o successivo, [uv](https://docs.astral.sh/uv/)
+- Claude Code installato e già autenticato: `claude auth status` deve rispondere senza errori
+- Un account Telegram
+
+## Setup iniziale (una volta sola)
+
+### 1. Crea il bot su Telegram
+
+1. Apri una chat con [@BotFather](https://t.me/botfather).
+2. Invia `/newbot`, scegli un nome e uno username che finisca in `bot` (per esempio `mario_claudecode_bot`).
+3. BotFather risponde con un token del tipo `123456789:AA...`: è il valore di `TELEGRAM_BOT_TOKEN`. Non condividerlo e non committarlo.
+4. Scrivi a [@userinfobot](https://t.me/userinfobot): risponde con il tuo user ID numerico, che va in `ALLOWED_USERS`.
+5. Consigliato: in BotFather invia `/setjoingroups`, scegli il bot e poi `Disable`, così nessuno può aggiungerlo a un gruppo.
+6. Apri la chat con il tuo bot e premi **Avvia**: finché non lo fai, il bot non può scriverti per primo.
+
+### 2. Configura il progetto
+
+```bash
+cp .env.example .env
+```
+
+Compila `.env`:
+
+| Variabile | Cosa contiene |
+|---|---|
+| `TELEGRAM_BOT_TOKEN` | Il token di BotFather |
+| `ALLOWED_USERS` | Il tuo user ID Telegram (più ID separati da virgola) |
+| `APPROVED_DIRECTORY` | La cartella sandbox: ogni sua sotto-cartella è un progetto. Non può contenere questo repository |
+| `CLAUDE_ALLOWED_TOOLS` | Strumenti che Claude può usare (default `Read,Grep,Glob,Bash,Edit,Write`) |
+| `CLAUDE_AUTO_APPROVE_TOOLS` | Strumenti approvati senza chiedere (default, sola lettura: `Read,Grep,Glob,LS`) |
+| `CLAUDE_TIMEOUT_SECONDS` | Secondi di silenzio di Claude dopo cui il turno viene chiuso. L'attesa di una tua approvazione non conta |
+| `APPROVAL_TIMEOUT_SECONDS` | Secondi per rispondere a una richiesta di approvazione, poi l'azione è negata |
+| `VERBOSE_LEVEL` | Dettaglio di default del progresso: 0, 1 o 2 |
+| `DB_PATH` | Database SQLite con sessioni e audit log |
+| `CLAUDE_BIN` | Comando di Claude Code, se non è `claude` nel PATH |
+| `ANTHROPIC_API_KEY` | Facoltativa: solo se vuoi la fatturazione API a consumo invece dell'abbonamento |
+
+## Avvio e arresto
+
+```bash
+./start.sh                # in primo piano: Ctrl+C per fermare
+./start.sh --background   # staccato dal terminale
+./stop.sh                 # arresto pulito
+```
+
+`start.sh` controlla il login di Claude Code, rifiuta un secondo avvio se il bot è già acceso e stampa `Bot attivo, in ascolto` quando è pronto. All'accensione ricevi su Telegram `🟢 Bot online`, allo spegnimento `🔴 Bot disattivato`.
+
+I messaggi che mandi mentre il bot è spento vengono scartati all'avvio: niente viene eseguito in ritardo.
+
+Se Claude Code usa un profilo con `CLAUDE_CONFIG_DIR`, lancia `start.sh` da una shell in cui quella variabile è già impostata: il bot la passa a Claude Code così com'è.
+
+### Systemd (facoltativo, solo avvio manuale)
+
+In `systemd/telegram-claude-bridge.service` c'è una unit utente senza sezione `[Install]`: `systemctl --user enable` la rifiuta, quindi non può partire al login. Per usarla, sostituisci `/path/to/telegram-claude-bridge` con il percorso del repository, controlla il `PATH` (deve contenere `uv` e `claude`), poi:
+
+```bash
+systemctl --user link "$PWD/systemd/telegram-claude-bridge.service"
+systemctl --user start telegram-claude-bridge
+systemctl --user stop telegram-claude-bridge
+```
+
+## Uso da Telegram
+
+| Comando | Effetto |
+|---|---|
+| `/start` | Benvenuto e lista dei progetti, con un bottone per ciascuno |
+| `/projects` | Lista dei progetti, quello attivo è segnato con ▶️ |
+| `/switch <nome>` | Cambia progetto. Se esiste una sessione salvata la riprende, altrimenti ne apre una nuova |
+| `/new` | Chiude la sessione del progetto attivo e ne apre una pulita al prossimo messaggio |
+| `/status` | Progetto, sessione, stato di Claude, verbosità, approvazioni in attesa |
+| `/verbose 0\|1\|2` | 0 solo la risposta finale, 1 strumenti usati in tempo reale, 2 strumenti con input completo |
+
+Tutto il resto che scrivi va a Claude Code nel progetto attivo. Mentre Claude lavora vedi un messaggio `⏳ sto lavorando…` che si aggiorna; a fine turno la risposta arriva come messaggio nuovo, così il telefono ti avvisa. Se scrivi mentre Claude sta ancora lavorando, il messaggio viene messo in coda.
+
+### Approvazioni
+
+| Strumento | Comportamento |
+|---|---|
+| `Read`, `Grep`, `Glob`, `LS` | Approvati in automatico |
+| `TodoWrite`, `Task`, `Agent`, `ExitPlanMode` | Approvati in automatico: non toccano file né sistema, e gli strumenti usati dai sub-agent passano comunque dal gate |
+| `Bash`, `Edit`, `Write` e qualunque altro strumento (`NotebookEdit`, `WebFetch`, …) | Messaggio con i bottoni `✅ Approva`, `❌ Nega`, `🚫 Nega e stop sessione` |
+| Qualunque percorso fuori da `APPROVED_DIRECTORY` | Bloccato sempre, anche se approveresti |
+
+Se non rispondi entro `APPROVAL_TIMEOUT_SECONDS` l'azione è negata. Se il bot si riavvia con richieste aperte, alla ripartenza le trovi marcate come annullate.
+
+### Scelte con i bottoni
+
+In modalità headless Claude Code non ha lo strumento `AskUserQuestion`. Il bridge insegna a Claude, con un prompt di sistema (`prompts/telegram-bridge-system-v1.md`), a chiudere il messaggio con righe `[[option: ...]]` quando deve farti scegliere: il bot le mostra come bottoni e ti basta toccarne uno. Puoi sempre rispondere anche a parole.
+
+## Sicurezza
+
+- **Whitelist**: ogni update Telegram viene controllato contro `ALLOWED_USERS` prima di qualsiasi handler.
+- **Sandbox**: i percorsi di `Read`, `Grep`, `Glob`, `Edit`, `Write` e `NotebookEdit` vengono risolti, symlink compresi, e confrontati con `APPROVED_DIRECTORY`.
+- **Bash**: il bridge cerca nei comandi i token che sembrano percorsi (`/…`, `~`, `..`) e blocca quelli fuori sandbox. È un controllo di superficie, non un sandbox vero: un comando può raggiungere file esterni in modi che una scansione dei token non vede. La protezione reale per `Bash` è la tua approvazione, quindi leggi il comando prima di premere ✅.
+- **Gate fail-closed**: se il bot non risponde, se l'hook va in errore o se Telegram non è raggiungibile, l'azione è negata.
+- **Segreti**: il token del bot non viene passato a Claude Code (che potrebbe leggerlo con `env`) e viene oscurato nei log.
+- **Audit log**: ogni messaggio inviato a Claude e ogni decisione sugli strumenti finiscono nella tabella `audit_log` di `DB_PATH`.
+- **Nessuna porta aperta**: il bot usa il long polling, solo connessioni in uscita.
+- `--dangerously-skip-permissions` non compare in nessun percorso del codice.
+
+- **Niente server MCP**: le sessioni aperte dal bot partono con `--strict-mcp-config`, quindi i server MCP configurati sul PC (console cloud, API di produzione) non sono raggiungibili dal telefono.
+- **File privati**: database, log, lock e socket vengono creati leggibili solo dal tuo utente.
+
+Claude Code carica comunque le tue impostazioni utente (`~/.claude/settings.json`), hook compresi: valgono anche per le sessioni aperte dal bot.
+
+## Test
+
+```bash
+uv run pytest
+```
+
+I test usano un finto binario `claude` (`tests/fake_claude.py`) che parla lo stesso protocollo stream-json, e fanno girare il vero hook contro il broker su un socket Unix.
+
+Test end-to-end manuale, da fare con un bot vero:
+
+1. `./start.sh` e attendi `🟢 Bot online` su Telegram.
+2. `/start`, scegli un progetto, chiedi a Claude di leggere un file: nessun bottone, risposta in chat.
+3. Chiedi di eseguire `ls` con Bash e premi ✅: il comando parte.
+4. Chiedi di creare un file con Bash e premi ❌: il file non deve esistere.
+5. `/switch` su un altro progetto e ritorno: la conversazione precedente riprende.
+6. `./stop.sh` e attendi `🔴 Bot disattivato`.
+
+## Struttura
+
+```
+src/
+  bot.py                 avvio, cablaggio degli handler, ciclo di vita
+  config.py              caricamento e validazione di .env
+  auth.py                whitelist utenti
+  claude_session.py      processo `claude -p` in stream-json, uno per progetto
+  session_manager.py     sessioni per progetto, resume, persistenza dei session_id
+  stream_parser.py       eventi stream-json di Claude Code
+  permission_policy.py   regole auto / chiedi / blocca e controllo sandbox
+  permission_gate.py     broker delle approvazioni su socket Unix
+  permission_hook.py     hook PreToolUse lanciato da Claude Code (solo libreria standard)
+  telegram_presenter.py  messaggi di approvazione con i bottoni
+  turn_runner.py         un turno: progresso, risposta, bottoni di scelta
+  message_formatter.py   righe dei tool, testo delle approvazioni, scelte
+  telegram_text.py       split a 4096 caratteri e conversione Markdown → HTML
+  telegram_io.py         invio con retry e backoff, messaggio di progresso
+  project_manager.py     progetti e controllo dei percorsi
+  session_store.py       SQLite: sessioni, stato utente, audit log, approvazioni aperte
+  logging_setup.py       log su file a rotazione con oscuramento dei segreti
+  handlers/              comandi, messaggi di testo, bottoni
+prompts/                 prompt di sistema versionato
+start.sh, stop.sh        avvio e arresto manuali
+systemd/                 unit facoltativa, non abilitabile
+```
