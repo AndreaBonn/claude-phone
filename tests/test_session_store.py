@@ -59,3 +59,28 @@ def test_database_file_is_private_even_if_it_existed(tmp_path: Path) -> None:
     db_path.chmod(0o644)
     SessionStore(db_path)
     assert db_path.stat().st_mode & 0o777 == 0o600
+
+
+def test_profile_roundtrip(store: SessionStore) -> None:
+    assert store.get_profile(42) is None
+    store.set_active_project(42, "alpha")
+    store.set_profile(42, "sales")
+    assert store.get_profile(42) == "sales"
+    assert store.get_active_project(42) == "alpha"
+
+
+def test_existing_database_gains_the_profile_column(tmp_path: Path) -> None:
+    import sqlite3
+
+    db_path = tmp_path / "old.db"
+    conn = sqlite3.connect(db_path)
+    conn.execute(
+        "CREATE TABLE user_states (user_id INTEGER PRIMARY KEY, active_project TEXT, "
+        "verbose_level INTEGER, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)"
+    )
+    conn.execute("INSERT INTO user_states VALUES (42, 'alpha', 2, 'x', 'x')")
+    conn.commit()
+    conn.close()
+    store = SessionStore(db_path)
+    store.set_profile(42, "sales")
+    assert (store.get_active_project(42), store.get_profile(42)) == ("alpha", "sales")

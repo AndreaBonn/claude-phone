@@ -23,11 +23,25 @@ if [[ ! -f .env ]]; then
 fi
 command -v uv >/dev/null || { echo "uv non trovato nel PATH." >&2; exit 1; }
 
-CLAUDE_BIN="$(grep -E '^CLAUDE_BIN=' .env | tail -n 1 | cut -d= -f2- || true)"
+env_value() { grep -E "^$1=" .env | tail -n 1 | cut -d= -f2- || true; }
+CLAUDE_BIN="$(env_value CLAUDE_BIN)"
 CLAUDE_BIN="${CLAUDE_BIN:-claude}"
+# Check the login of the startup profile, the same way the bot will run claude.
+CLAUDE_PROFILE="$(env_value CLAUDE_PROFILE)"
+PROFILES_DIR="$(env_value CLAUDE_PROFILES_DIR)"
+PROFILES_DIR="${PROFILES_DIR:-$HOME/.cloak/profiles}"
+PROFILES_DIR="${PROFILES_DIR/#\~/$HOME}"
+unset CLAUDE_CONFIG_DIR
+if [[ -n "$CLAUDE_PROFILE" && "$CLAUDE_PROFILE" != "default" ]]; then
+    if [[ ! -d "$PROFILES_DIR/$CLAUDE_PROFILE" ]]; then
+        echo "Profilo Claude '$CLAUDE_PROFILE' non trovato in $PROFILES_DIR." >&2
+        exit 1
+    fi
+    export CLAUDE_CONFIG_DIR="$PROFILES_DIR/$CLAUDE_PROFILE"
+fi
 # shellcheck disable=SC2086  # CLAUDE_BIN may carry arguments on purpose
 if ! $CLAUDE_BIN auth status >/dev/null 2>&1; then
-    echo "Claude Code non è autenticato ('$CLAUDE_BIN auth status' fallito). Esegui 'claude auth login'." >&2
+    echo "Claude Code non è autenticato per il profilo '${CLAUDE_PROFILE:-default}': rifai il login." >&2
     exit 1
 fi
 

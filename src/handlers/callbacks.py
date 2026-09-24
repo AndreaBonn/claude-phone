@@ -5,6 +5,7 @@ from telegram.error import TelegramError
 from telegram.ext import ContextTypes
 
 from src.bridge_context import get_bridge
+from src.handlers.profile import select_profile
 from src.handlers.projects import (
     find_project,
     project_keyboard,
@@ -117,3 +118,18 @@ async def handle_project_page(update: Update, context: ContextTypes.DEFAULT_TYPE
     keyboard = project_keyboard(bridge.projects.list_projects(), active, page)
     await query.answer()
     await query.edit_message_text(projects_text(bridge, active, page), reply_markup=keyboard)
+
+
+async def handle_profile_pick(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """`pf:<name>` — a profile button from /profile."""
+    bridge = get_bridge(context)
+    query = update.callback_query
+    user = update.effective_user
+    assert query is not None and user is not None
+    fields = _parse(query.data, parts=2)
+    if fields is None:
+        await query.answer(INVALID_BUTTON)
+        return
+    reply = await select_profile(bridge, user.id, fields[1])
+    await query.answer()
+    await query.edit_message_text(reply)

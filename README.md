@@ -43,6 +43,8 @@ Compila `.env`:
 | `VERBOSE_LEVEL` | Dettaglio di default del progresso: 0, 1 o 2 |
 | `DB_PATH` | Database SQLite con sessioni e audit log |
 | `CLAUDE_BIN` | Comando di Claude Code, se non è `claude` nel PATH |
+| `CLAUDE_PROFILE` | Profilo Claude all'avvio, per esempio `sales`: una sotto-cartella di `CLAUDE_PROFILES_DIR`. Vuoto = `~/.claude` |
+| `CLAUDE_PROFILES_DIR` | Cartella dei profili, di default `~/.cloak/profiles` (quella di cloak) |
 | `ANTHROPIC_API_KEY` | Facoltativa: solo se vuoi la fatturazione API a consumo invece dell'abbonamento |
 
 ## Avvio e arresto
@@ -57,7 +59,11 @@ Compila `.env`:
 
 I messaggi che mandi mentre il bot è spento vengono scartati all'avvio: niente viene eseguito in ritardo.
 
-Se Claude Code usa un profilo con `CLAUDE_CONFIG_DIR`, lancia `start.sh` da una shell in cui quella variabile è già impostata: il bot la passa a Claude Code così com'è.
+### Profili (cloak)
+
+Un profilo cloak è una cartella in `~/.cloak/profiles` con il suo login. Il bot avvia Claude Code con `CLAUDE_CONFIG_DIR` puntato al profilo scelto, senza passare da `cloak`. Da Telegram `/profile` mostra `default` e i profili trovati come bottoni; `/profile sales` cambia direttamente. La scelta resta salvata anche dopo un riavvio e prevale su `CLAUDE_PROFILE`. Ogni profilo ha le sue sessioni: tornando a un profilo riprendi la sua conversazione.
+
+`claude auth status` risponde "loggato" anche quando il token è scaduto, quindi `start.sh` non se ne accorge. In quel caso il bot risponde con un errore 401 e ti dice cosa fare: sul PC apri Claude Code con quel profilo (`claude -a <nome>`, oppure `claude` per il default) e rifai `/login`.
 
 ### Systemd (facoltativo, solo avvio manuale)
 
@@ -78,6 +84,7 @@ systemctl --user stop telegram-claude-bridge
 | `/switch <radice>/<nome>` | Cambia progetto. Se esiste una sessione salvata la riprende, altrimenti ne apre una nuova |
 | `/new` | Chiude la sessione del progetto attivo e ne apre una pulita al prossimo messaggio |
 | `/status` | Progetto, sessione, stato di Claude, verbosità, approvazioni in attesa |
+| `/profile [nome]` | Profilo Claude (cloak) da usare: bottoni, oppure cambio diretto con il nome |
 | `/verbose 0\|1\|2` | 0 solo la risposta finale, 1 strumenti usati in tempo reale, 2 strumenti con input completo |
 
 Tutto il resto che scrivi va a Claude Code nel progetto attivo. Mentre Claude lavora vedi un messaggio `⏳ sto lavorando…` che si aggiorna; a fine turno la risposta arriva come messaggio nuovo, così il telefono ti avvisa. Se scrivi mentre Claude sta ancora lavorando, il messaggio viene messo in coda.

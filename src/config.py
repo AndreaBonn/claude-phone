@@ -42,6 +42,10 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     claude_bin: str = "claude"
     anthropic_api_key: SecretStr | None = None
+    # Claude profile at startup (a sub-directory of CLAUDE_PROFILES_DIR, as made by
+    # cloak); empty means the default ~/.claude. /profile changes it at runtime.
+    claude_profile: str = ""
+    claude_profiles_dir: Path = Path("~/.cloak/profiles")
 
     @field_validator("allowed_users", mode="before")
     @classmethod
@@ -60,6 +64,11 @@ class Settings(BaseSettings):
     @classmethod
     def _empty_key_is_none(cls, value: object) -> object:
         return None if value == "" else value
+
+    @field_validator("claude_profiles_dir")
+    @classmethod
+    def _expand_profiles_dir(cls, value: Path) -> Path:
+        return value.expanduser()
 
     @field_validator("approved_directory", mode="before")
     @classmethod

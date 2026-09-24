@@ -30,6 +30,10 @@ uv run mypy src tests
 - `permission_hook.py` is stdlib-only and must not import `src`: it runs inside the project directory, not the bridge's.
 - Measured protocol facts: each turn emits one `system/init` and ends with one `result`; `--resume` keeps the session id; a hook reply with `continue: false` ends the turn but keeps the process alive; resuming an unknown session yields a `result` with `num_turns: 0` plus `No conversation found` on stderr, then exit 1.
 
+## Claude profiles
+
+A profile is a directory under `CLAUDE_PROFILES_DIR` (cloak layout); `build_env` always sets or removes `CLAUDE_CONFIG_DIR`, so the bot shell's own profile never leaks in. `SessionManager.set_profile` refuses while busy and stops all processes; session ids are stored under `<profile>::<project>` because transcripts live per profile. `claude auth status` reports `loggedIn: true` even with an expired token (measured), so auth failures surface as a 401 result and `turn_runner` appends a re-login hint.
+
 ## Tests
 
 `tests/fake_claude.py` stands in for the `claude` binary (scenarios via `FAKE_SCENARIO`: echo, crash, hang, notfound). `tests/fakes.FakeBot` records Telegram calls. The gate tests run the real hook script against a real broker socket.

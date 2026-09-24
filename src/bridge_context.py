@@ -3,6 +3,7 @@ from typing import Any
 
 from src.config import Settings
 from src.permission_gate import ApprovalBroker
+from src.profiles import ProfileCatalog
 from src.project_manager import ProjectManager
 from src.session_manager import SessionManager
 from src.session_store import SessionStore
@@ -29,6 +30,7 @@ class BridgeContext:
     sessions: SessionManager
     broker: ApprovalBroker
     presenter: TelegramApprovalPresenter
+    profiles: ProfileCatalog
     # Open choice buttons: token -> choices. A new turn invalidates its project's ones.
     choices: dict[str, ChoiceSet] = field(default_factory=dict)
 

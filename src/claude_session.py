@@ -26,6 +26,7 @@ STOP_GRACE_SECONDS = 5.0
 HOOK_TIMEOUT_MARGIN = 30
 SECRET_ENV_VARS = ("TELEGRAM_BOT_TOKEN", "ANTHROPIC_API_KEY")
 SESSION_NOT_FOUND_MARKER = "No conversation found"
+CONFIG_DIR_ENV = "CLAUDE_CONFIG_DIR"
 
 EventCallback = Callable[[StreamEvent], Awaitable[None]]
 
@@ -55,6 +56,8 @@ class SessionConfig:
     idle_timeout: float
     system_prompt: str
     api_key: str | None = None
+    # Claude profile directory (CLAUDE_CONFIG_DIR); None means the default ~/.claude.
+    config_dir: Path | None = None
 
 
 def build_hook_settings(config: SessionConfig) -> str:
@@ -104,6 +107,10 @@ def build_env(config: SessionConfig, project: str, base: Mapping[str, str]) -> d
     env[TIMEOUT_ENV] = str(config.approval_timeout + HOOK_TIMEOUT_MARGIN)
     if config.api_key:
         env["ANTHROPIC_API_KEY"] = config.api_key
+    # Explicit either way: the bot's own shell may carry another profile.
+    env.pop(CONFIG_DIR_ENV, None)
+    if config.config_dir is not None:
+        env[CONFIG_DIR_ENV] = str(config.config_dir)
     return env
 
 

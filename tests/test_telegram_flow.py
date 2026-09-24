@@ -36,6 +36,7 @@ def bridge(
     monkeypatch.setenv("FAKE_SCENARIO", "echo")
     (tmp_path / "sandbox" / "alpha").mkdir(parents=True)
     (tmp_path / "sandbox" / "beta").mkdir()
+    (tmp_path / "profiles" / "sales").mkdir(parents=True)
     settings = Settings.model_validate(
         {
             "telegram_bot_token": "1:x",
@@ -45,6 +46,7 @@ def bridge(
             "db_path": str(tmp_path / "bridge.db"),
             "gate_socket_path": str(tmp_path / "g.sock"),
             "approval_timeout_seconds": 5,
+            "claude_profiles_dir": str(tmp_path / "profiles"),
         }
     )
     bridge = build_bridge(settings, bot)
@@ -98,7 +100,7 @@ async def test_switch_project_sets_active_and_rejects_traversal(bridge: BridgeCo
     reply = await switch_project(bridge, USER, BETA)
     assert bridge.store.get_active_project(USER) == BETA
     assert "Nuova sessione" in reply
-    bridge.store.save_session(ALPHA, "abcdef123456")
+    bridge.store.save_session(f"default::{ALPHA}", "abcdef123456")
     assert "abcdef12" in await switch_project(bridge, USER, ALPHA)
     with pytest.raises(SandboxError):
         await switch_project(bridge, USER, "../..")
@@ -163,7 +165,7 @@ def test_build_application_registers_guard_first(bridge: BridgeContext) -> None:
 
     app = build_application(bridge.settings)
     assert isinstance(app.handlers[-1][0], TypeHandler)
-    assert len(app.handlers[0]) == 11
+    assert len(app.handlers[0]) == 13
     app.bot_data[BRIDGE_KEY].store.close()
 
 
@@ -281,3 +283,47 @@ async def test_final_text_is_not_repeated_in_progress(bridge: BridgeContext, bot
     await bridge.sessions.stop_all()
     assert monkeypatch_text not in bot.messages[0].text
     assert "💬 working" in bot.messages[0].text
+
+
+async def test_profile_button_switches_claude_profile(bridge: BridgeContext, bot: FakeBot) -> None:
+    from src.handlers.profile import profile_keyboard
+
+    keyboard = profile_keyboard(bridge.profiles.list_profiles(), active="default")
+    assert [row[0].text for row in keyboard.inline_keyboard] == ["▶️ default", "sales"]
+
+    class PickQuery(FakeQuery):
+        edited: str = ""
+
+        async def edit_message_text(self, text: str) -> None:
+            self.edited = text
+
+    query = PickQuery(str(keyboard.inline_keyboard[1][0].callback_data))
+    update = SimpleNamespace(callback_query=query, effective_user=SimpleNamespace(id=USER))
+    context = SimpleNamespace(application=SimpleNamespace(bot_data={BRIDGE_KEY: bridge}), bot=bot)
+    await callbacks.handle_profile_pick(cast(Update, update), cast(Any, context))
+    assert bridge.sessions.profile == "sales"
+    assert bridge.store.get_profile(USER) == "sales"
+    assert "sales" in query.edited
+
+
+async def test_initial_profile_prefers_last_choice_then_settings(bridge: BridgeContext) -> None:
+    from src.handlers.profile import apply_initial_profile
+
+    await apply_initial_profile(bridge)
+    assert bridge.sessions.profile == "default"
+    bridge.store.set_profile(USER, "sales")
+    await apply_initial_profile(bridge)
+    assert bridge.sessions.profile == "sales"
+    bridge.store.set_profile(USER, "deleted-profile")
+    await apply_initial_profile(bridge)
+    assert bridge.sessions.profile == "default"
+
+
+async def test_auth_error_tells_how_to_log_in_again(
+    bridge: BridgeContext, bot: FakeBot, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("FAKE_SCENARIO", "autherror")
+    await run_user_turn(bridge, bot, turn("chi sei?"))
+    await bridge.sessions.stop_all()
+    answer = bot.messages[-1].text
+    assert "/profile" in answer and "/login" in answer and "default" in answer

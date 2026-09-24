@@ -20,6 +20,7 @@ from src.stream_parser import StreamEvent, ToolUseEvent
 
 FAKE_CLAUDE = Path(__file__).resolve().parent / "fake_claude.py"
 PROJECT = "sandbox/alpha"
+STORE_KEY = f"default::{PROJECT}"
 
 
 class Harness:
@@ -64,7 +65,7 @@ async def test_turn_streams_events_and_returns_result(harness: Harness) -> None:
     await harness.manager.stop_all()
     assert outcome.result.text == "echo: hi"
     assert any(isinstance(event, ToolUseEvent) for event in harness.events)
-    assert harness.store.get_session(PROJECT) == outcome.result.session_id
+    assert harness.store.get_session(STORE_KEY) == outcome.result.session_id
 
 
 async def test_process_is_reused_across_turns(harness: Harness) -> None:
@@ -86,7 +87,7 @@ async def test_concurrent_messages_are_queued_in_order(harness: Harness) -> None
 
 
 async def test_saved_session_is_resumed(harness: Harness) -> None:
-    harness.store.save_session(PROJECT, "saved-id")
+    harness.store.save_session(STORE_KEY, "saved-id")
     outcome = await harness.manager.run_turn(PROJECT, "hi", harness.on_event)
     await harness.manager.stop_all()
     argv = harness.starts()[0]["argv"]
@@ -98,12 +99,12 @@ async def test_missing_saved_session_falls_back_to_new_one(
     harness: Harness, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("FAKE_SCENARIO", "notfound")
-    harness.store.save_session(PROJECT, "gone")
+    harness.store.save_session(STORE_KEY, "gone")
     outcome = await harness.manager.run_turn(PROJECT, "hi", harness.on_event)
     await harness.manager.stop_all()
     assert outcome.fresh_session is True
     assert outcome.result.text == "echo: hi"
-    assert harness.store.get_session(PROJECT) not in (None, "gone")
+    assert harness.store.get_session(STORE_KEY) not in (None, "gone")
 
 
 async def test_crash_mid_turn_raises_with_stderr(
@@ -113,7 +114,7 @@ async def test_crash_mid_turn_raises_with_stderr(
     with pytest.raises(ClaudeCrashedError, match="boom"):
         await harness.manager.run_turn(PROJECT, "hi", harness.on_event)
     assert harness.manager.is_running(PROJECT) is False
-    assert harness.store.get_session(PROJECT) is not None
+    assert harness.store.get_session(STORE_KEY) is not None
 
 
 async def test_idle_timeout_kills_process(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -165,7 +166,7 @@ async def test_request_stop_ends_process_after_turn(harness: Harness) -> None:
 async def test_reset_forgets_session(harness: Harness) -> None:
     await harness.manager.run_turn(PROJECT, "hi", harness.on_event)
     await harness.manager.reset(PROJECT)
-    assert harness.store.get_session(PROJECT) is None
+    assert harness.store.get_session(STORE_KEY) is None
     assert harness.manager.session_id(PROJECT) is None
 
 
@@ -190,3 +191,41 @@ async def test_huge_stderr_line_does_not_block_the_child(
     outcome = await harness.manager.run_turn(PROJECT, "hi", harness.on_event)
     await harness.manager.stop_all()
     assert outcome.result.text == "echo: hi"
+
+
+def test_build_env_sets_configured_claude_profile(tmp_path: Path) -> None:
+    from src.claude_session import build_env
+
+    config = SessionConfig(
+        ("claude",), ("Read",), tmp_path / "s", 300, 300, "p", config_dir=tmp_path / "profile"
+    )
+    env = build_env(config, "p", {"CLAUDE_CONFIG_DIR": "/other", "HOME": "/h"})
+    assert env["CLAUDE_CONFIG_DIR"] == str(tmp_path / "profile")
+    default = SessionConfig(("claude",), ("Read",), tmp_path / "s", 300, 300, "p")
+    # The default profile is ~/.claude, whatever profile the bot's shell had.
+    assert "CLAUDE_CONFIG_DIR" not in build_env(default, "p", {"CLAUDE_CONFIG_DIR": "/other"})
+
+
+async def test_each_profile_keeps_its_own_session(harness: Harness, tmp_path: Path) -> None:
+    first = await harness.manager.run_turn(PROJECT, "one", harness.on_event)
+    assert await harness.manager.set_profile("sales", tmp_path / "sales") is True
+    assert harness.manager.is_running(PROJECT) is False
+    second = await harness.manager.run_turn(PROJECT, "two", harness.on_event)
+    assert await harness.manager.set_profile("default", None) is True
+    third = await harness.manager.run_turn(PROJECT, "three", harness.on_event)
+    await harness.manager.stop_all()
+    starts = harness.starts()
+    assert starts[1]["env"]["CLAUDE_CONFIG_DIR"] == str(tmp_path / "sales")
+    assert "--resume" not in starts[1]["argv"]
+    assert second.result.session_id != first.result.session_id
+    assert third.result.session_id == first.result.session_id
+    assert harness.manager.profile == "default"
+
+
+async def test_profile_switch_is_refused_while_busy(harness: Harness, tmp_path: Path) -> None:
+    turn = asyncio.create_task(harness.manager.run_turn(PROJECT, "one", harness.on_event))
+    await asyncio.sleep(0)
+    assert await harness.manager.set_profile("sales", tmp_path) is False
+    await turn
+    await harness.manager.stop_all()
+    assert harness.manager.profile == "default"

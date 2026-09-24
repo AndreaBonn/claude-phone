@@ -20,6 +20,12 @@ AUDIT_DETAIL_MAX = 300
 ERROR_DETAIL_MAX = 1500
 QUEUED_NOTICE = "📥 Messaggio in coda: Claude sta ancora lavorando sul precedente."
 FRESH_SESSION_NOTICE = "🔁 La sessione salvata non esiste più: ne ho aperta una nuova.\n\n"
+AUTH_ERROR_MARKERS = ("401", "authenticat", "oauth")
+AUTH_HINT = (
+    "\n\n🔑 Il login del profilo {profile} non è valido. Sul PC apri Claude Code con quel "
+    "profilo e rifai /login (profilo default: `claude`; profilo cloak: `claude -a <nome>`), "
+    "oppure scegli un altro profilo con /profile."
+)
 EMPTY_ANSWER = "(Claude ha chiuso il turno senza testo: se hai negato un'azione è normale.)"
 
 
@@ -136,6 +142,8 @@ async def _deliver(
     outcome: TurnOutcome,
 ) -> None:
     text, options = _answer_text(outcome)
+    if outcome.result.is_error and any(m in text.lower() for m in AUTH_ERROR_MARKERS):
+        text += AUTH_HINT.format(profile=bridge.sessions.profile)
     verbose = _verbosity(bridge, request)
     # The final text also streamed as a progress line: keep it only in the answer.
     progress.drop_last(describe_event(TextEvent(text=outcome.result.text), verbose))

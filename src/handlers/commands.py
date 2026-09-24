@@ -11,7 +11,7 @@ VERBOSE_LEVELS = ("0", "1", "2")
 WELCOME = (
     "🤖 Bridge Claude Code attivo.\n"
     "Scegli un progetto, poi scrivimi normalmente: inoltro tutto a Claude Code.\n"
-    "Comandi: /projects /switch <nome> /new /status /verbose <0|1|2>"
+    "Comandi: /projects /switch <nome> /new /status /verbose <0|1|2> /profile"
 )
 
 
@@ -79,6 +79,7 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             f"⚙️ Processo Claude: {running}, {state}",
         ]
     lines += [
+        f"👤 Profilo Claude: {bridge.sessions.profile}",
         f"🔊 Verbosità: {verbose}",
         f"🔐 Approvazioni pendenti: {len(bridge.broker.pending())}",
         "📦 Sandbox: " + ", ".join(str(root) for root in bridge.settings.approved_directory),

@@ -14,6 +14,7 @@ CREATE TABLE IF NOT EXISTS user_states (
     user_id INTEGER PRIMARY KEY,
     active_project TEXT,
     verbose_level INTEGER,
+    claude_profile TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
@@ -79,6 +80,13 @@ class SessionStore:
         # The audit log holds prompt texts: readable by the owner only.
         db_path.chmod(PRIVATE_FILE_MODE)
         self._conn.executescript(SCHEMA)
+        self._migrate()
+
+    def _migrate(self) -> None:
+        # Databases created before profiles existed lack the column.
+        columns = {row[1] for row in self._conn.execute("PRAGMA table_info(user_states)")}
+        if "claude_profile" not in columns:
+            self._conn.execute("ALTER TABLE user_states ADD COLUMN claude_profile TEXT")
 
     def close(self) -> None:
         self._conn.close()
@@ -130,6 +138,21 @@ class SessionStore:
             "VALUES (?, ?, ?, ?) ON CONFLICT(user_id) DO UPDATE SET "
             "verbose_level = excluded.verbose_level, updated_at = excluded.updated_at",
             (user_id, level, now, now),
+        )
+
+    def get_profile(self, user_id: int) -> str | None:
+        row = self._conn.execute(
+            "SELECT claude_profile FROM user_states WHERE user_id = ?", (user_id,)
+        ).fetchone()
+        return row[0] if row else None
+
+    def set_profile(self, user_id: int, profile: str) -> None:
+        now = _now()
+        self._conn.execute(
+            "INSERT INTO user_states (user_id, claude_profile, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?) ON CONFLICT(user_id) DO UPDATE SET "
+            "claude_profile = excluded.claude_profile, updated_at = excluded.updated_at",
+            (user_id, profile, now, now),
         )
 
     def record_audit(

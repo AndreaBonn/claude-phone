@@ -23,11 +23,12 @@ from src.auth import build_auth_guard
 from src.bridge_context import BRIDGE_KEY, BridgeContext
 from src.claude_session import SYSTEM_PROMPT_PATH, SessionConfig
 from src.config import PROJECT_ROOT, Settings, format_config_error
-from src.handlers import callbacks, commands, messages
+from src.handlers import callbacks, commands, messages, profile
 from src.logging_setup import setup_logging
 from src.message_formatter import summarize_tool_input, truncate
 from src.permission_gate import ApprovalBroker
 from src.permission_policy import GatePolicy
+from src.profiles import ProfileCatalog
 from src.project_manager import ProjectManager, Sandbox
 from src.session_manager import SessionManager
 from src.session_store import SessionStore
@@ -49,6 +50,7 @@ BOT_COMMANDS = [
     BotCommand("new", "Nuova sessione per il progetto attivo"),
     BotCommand("status", "Stato di progetto, sessione e approvazioni"),
     BotCommand("verbose", "Dettaglio del progresso: /verbose 0|1|2"),
+    BotCommand("profile", "Profilo Claude (cloak) da usare"),
 ]
 
 
@@ -117,7 +119,8 @@ def build_bridge(settings: Settings, bot: Any) -> BridgeContext:
         sessions.request_stop,
     )
     broker_ref.append(broker)
-    return BridgeContext(settings, store, projects, sessions, broker, presenter)
+    profiles = ProfileCatalog(settings.claude_profiles_dir)
+    return BridgeContext(settings, store, projects, sessions, broker, presenter, profiles)
 
 
 AnyApplication = Application[Any, Any, Any, Any, Any, Any]
@@ -138,6 +141,7 @@ async def _broadcast(app: AnyApplication, text: str) -> None:
 
 async def on_startup(app: AnyApplication) -> None:
     bridge = bridge_of(app)
+    await profile.apply_initial_profile(bridge)
     await bridge.broker.start(bridge.settings.gate_socket_path)
     await app.bot.set_my_commands(BOT_COMMANDS)
     cancelled = await bridge.presenter.cancel_leftovers()
@@ -171,6 +175,7 @@ def register_handlers(app: AnyApplication, allowed_users: frozenset[int]) -> Non
     app.add_handler(CommandHandler("new", commands.new_session))
     app.add_handler(CommandHandler("status", commands.status))
     app.add_handler(CommandHandler("verbose", commands.verbose))
+    app.add_handler(CommandHandler("profile", profile.profile))
     app.add_handler(
         MessageHandler(
             filters.TEXT & ~filters.COMMAND & filters.ChatType.PRIVATE, messages.handle_text
@@ -180,6 +185,7 @@ def register_handlers(app: AnyApplication, allowed_users: frozenset[int]) -> Non
     app.add_handler(CallbackQueryHandler(callbacks.handle_choice, pattern=f"^{CHOICE_PREFIX}:"))
     app.add_handler(CallbackQueryHandler(callbacks.handle_project_pick, pattern=r"^pj:"))
     app.add_handler(CallbackQueryHandler(callbacks.handle_project_page, pattern=r"^pg:"))
+    app.add_handler(CallbackQueryHandler(callbacks.handle_profile_pick, pattern=r"^pf:"))
     app.add_error_handler(on_error)
 
 
