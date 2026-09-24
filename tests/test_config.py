@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from src.config import PROJECT_ROOT, Settings
+from src.config import PROJECT_ROOT, Settings, format_config_error
 
 
 def make_settings(tmp_path: Path, **overrides: object) -> Settings:
@@ -72,3 +72,11 @@ def test_settings_relative_paths_anchor_to_project_root(tmp_path: Path) -> None:
 
 def test_settings_token_is_not_in_repr(tmp_path: Path) -> None:
     assert "123:abc" not in repr(make_settings(tmp_path))
+
+
+def test_format_config_error_never_prints_input_values(tmp_path: Path) -> None:
+    with pytest.raises(ValidationError) as caught:
+        make_settings(tmp_path, telegram_bot_token="9:TOPSECRET", approved_directory="/")
+    text = format_config_error(caught.value)
+    assert "TOPSECRET" not in text
+    assert "APPROVED_DIRECTORY must not contain the bridge" in text

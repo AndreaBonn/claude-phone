@@ -1,7 +1,7 @@
 from pathlib import Path
 from typing import Annotated
 
-from pydantic import Field, SecretStr, field_validator, model_validator
+from pydantic import Field, SecretStr, ValidationError, field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -84,3 +84,12 @@ class Settings(BaseSettings):
         if len(str(self.gate_socket_path).encode()) > MAX_UNIX_SOCKET_PATH:
             raise ValueError(f"GATE_SOCKET_PATH too long: {self.gate_socket_path}")
         return self
+
+
+def format_config_error(error: ValidationError) -> str:
+    """Render a settings error without pydantic's `input_value`, which holds the token."""
+    lines = []
+    for item in error.errors(include_input=False, include_url=False):
+        location = ".".join(str(part) for part in item["loc"]).upper() or "SETTINGS"
+        lines.append(f"- {location}: {item['msg']}")
+    return "\n".join(lines)
