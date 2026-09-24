@@ -42,6 +42,20 @@ def main() -> None:
             sys.stderr.write(f"No conversation found with session ID: {resume}\n")
             sys.exit(1)
         emit({"type": "system", "subtype": "init", "session_id": session_id})
+        if scenario == "autherror":
+            message = "Failed to authenticate. API Error: 401 OAuth access token has expired."
+            emit({"type": "assistant", "message": {"content": [{"type": "text", "text": message}]}})
+            emit(
+                {
+                    "type": "result",
+                    "subtype": "success",
+                    "is_error": True,
+                    "result": message,
+                    "session_id": session_id,
+                    "num_turns": 1,
+                }
+            )
+            continue
         if scenario == "crash":
             sys.stderr.write("boom: simulated crash\n")
             sys.exit(3)
@@ -65,6 +79,12 @@ def main() -> None:
                         },
                     ]
                 },
+            }
+        )
+        emit(
+            {
+                "type": "assistant",
+                "message": {"content": [{"type": "text", "text": f"echo: {text}"}]},
             }
         )
         result(session_id, f"echo: {text}")

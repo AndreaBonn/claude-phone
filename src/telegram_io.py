@@ -151,6 +151,11 @@ class ProgressMessage:
             # Progress is best effort: a failed edit must not abort Claude's turn.
             logger.exception("Could not update progress message")
 
+    def drop_last(self, line: str | None) -> None:
+        """Forget the latest line if it equals `line` (not yet shown by finish)."""
+        if line is not None and self.lines and self.lines[-1] == line:
+            self.lines.pop()
+
     async def finish(self, header: str) -> None:
         self._cancel_flush()
         self.header = header

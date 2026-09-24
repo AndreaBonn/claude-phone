@@ -260,3 +260,24 @@ async def test_page_button_edits_the_project_list(bridge: BridgeContext, bot: Fa
     context = SimpleNamespace(application=SimpleNamespace(bot_data={BRIDGE_KEY: bridge}), bot=bot)
     await callbacks.handle_project_page(cast(Update, update), cast(Any, context))
     assert [row[0].text for row in query.markup.inline_keyboard] == [f"▶️ {ALPHA}", BETA]
+
+
+async def test_error_result_is_reported_once_without_subtype_noise(
+    bridge: BridgeContext, bot: FakeBot, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("FAKE_SCENARIO", "autherror")
+    await run_user_turn(bridge, bot, turn("chi sei?"))
+    await bridge.sessions.stop_all()
+    progress, answer = bot.messages
+    assert "(success)" not in answer.text
+    assert answer.text.startswith("❌ Claude ha segnalato un errore")
+    assert "401" in answer.text
+    assert "401" not in progress.text
+
+
+async def test_final_text_is_not_repeated_in_progress(bridge: BridgeContext, bot: FakeBot) -> None:
+    monkeypatch_text = "echo: hello"
+    await run_user_turn(bridge, bot, turn("hello"))
+    await bridge.sessions.stop_all()
+    assert monkeypatch_text not in bot.messages[0].text
+    assert "💬 working" in bot.messages[0].text

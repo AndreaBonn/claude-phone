@@ -10,7 +10,7 @@ from src.claude_session import ClaudeCrashedError, ClaudeTimeoutError, EventCall
 from src.message_formatter import describe_event, extract_choices, truncate
 from src.project_manager import SandboxError
 from src.session_manager import TurnOutcome
-from src.stream_parser import StreamEvent
+from src.stream_parser import StreamEvent, TextEvent
 from src.telegram_io import ProgressMessage, send_text
 
 logger = logging.getLogger(__name__)
@@ -66,7 +66,9 @@ def _answer_text(outcome: TurnOutcome) -> tuple[str, list[str]]:
     result = outcome.result
     text, options = extract_choices(result.text)
     if result.is_error:
-        text = f"❌ Claude ha segnalato un errore ({result.subtype}).\n{text}".rstrip()
+        # The CLI reports some errors (auth, API) with subtype "success".
+        detail = f" ({result.subtype})" if result.subtype != "success" else ""
+        text = f"❌ Claude ha segnalato un errore{detail}.\n{text}".rstrip()
     elif not text.strip():
         text = EMPTY_ANSWER
     if outcome.fresh_session:
@@ -134,7 +136,10 @@ async def _deliver(
     outcome: TurnOutcome,
 ) -> None:
     text, options = _answer_text(outcome)
-    if _verbosity(bridge, request) == 0:
+    verbose = _verbosity(bridge, request)
+    # The final text also streamed as a progress line: keep it only in the answer.
+    progress.drop_last(describe_event(TextEvent(text=outcome.result.text), verbose))
+    if verbose == 0:
         await progress.delete()
     else:
         status = "⚠️" if outcome.result.is_error else "✅"
