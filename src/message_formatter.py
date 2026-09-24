@@ -4,6 +4,8 @@ import re
 from pathlib import PurePath
 from typing import Any
 
+from src.stream_parser import StreamEvent, TextEvent, ToolResultEvent, ToolUseEvent
+
 TOOL_EMOJI = {
     "Read": "📖",
     "Grep": "🔍",
@@ -26,6 +28,8 @@ FULL_INPUT_MAX = 1000
 APPROVAL_SNIPPET_MAX = 1500
 MAX_CHOICES = 8
 CHOICE_LABEL_MAX = 60
+TEXT_PREVIEW_MAX = 300
+TEXT_FULL_MAX = 1500
 _CHOICE = re.compile(r"^[ \t]*\[\[option:[ \t]*(.+?)[ \t]*\]\][ \t]*$", re.MULTILINE)
 
 
@@ -107,3 +111,17 @@ def render_progress(header: str, lines: list[str], limit: int) -> str:
         kept.append(line)
         size += len(line) + 1
     return "\n".join([header, *reversed(kept)])
+
+
+def describe_event(event: StreamEvent, verbose: int) -> str | None:
+    """Progress line for any streamed event, or None if hidden at this verbosity."""
+    if verbose <= 0:
+        return None
+    limit = TEXT_PREVIEW_MAX if verbose == 1 else TEXT_FULL_MAX
+    if isinstance(event, ToolUseEvent):
+        return format_tool_line(name=event.name, tool_input=event.input, verbose=verbose)
+    if isinstance(event, TextEvent):
+        return f"💬 {truncate(event.text.strip(), limit)}"
+    if isinstance(event, ToolResultEvent) and event.is_error:
+        return f"⚠️ {truncate(event.content.strip(), limit)}"
+    return None

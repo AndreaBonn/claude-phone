@@ -1,10 +1,12 @@
 from src.message_formatter import (
     MAX_CHOICES,
+    describe_event,
     extract_choices,
     format_approval_request,
     format_tool_line,
     render_progress,
 )
+from src.stream_parser import TextEvent, ToolResultEvent, ToolUseEvent
 
 
 def test_format_tool_line_verbose_zero_hides_tools() -> None:
@@ -82,3 +84,28 @@ def test_render_progress_keeps_most_recent_lines_within_limit() -> None:
     assert len(rendered) <= 300
     assert rendered.startswith("⏳ Working")
     assert rendered.endswith("step 499")
+
+
+def test_describe_event_hides_everything_at_verbose_zero() -> None:
+    assert describe_event(TextEvent(text="hi"), verbose=0) is None
+    assert describe_event(ToolUseEvent(tool_use_id="t", name="Bash", input={}), verbose=0) is None
+
+
+def test_describe_event_renders_text_tools_and_errors() -> None:
+    assert describe_event(TextEvent(text=" Checking "), verbose=1) == "💬 Checking"
+    tool = ToolUseEvent(tool_use_id="t", name="Bash", input={"command": "ls"})
+    assert describe_event(tool, verbose=1) == "💻 Bash: ls"
+    denied = ToolResultEvent(tool_use_id="t", is_error=True, content="denied by user")
+    assert describe_event(denied, verbose=1) == "⚠️ denied by user"
+
+
+def test_describe_event_skips_successful_tool_results() -> None:
+    ok = ToolResultEvent(tool_use_id="t", is_error=False, content="file content")
+    assert describe_event(ok, verbose=2) is None
+
+
+def test_describe_event_truncates_text_more_at_verbose_one() -> None:
+    long_text = TextEvent(text="x" * 5000)
+    short = describe_event(long_text, verbose=1)
+    full = describe_event(long_text, verbose=2)
+    assert short is not None and full is not None and len(short) < len(full)
