@@ -230,3 +230,29 @@ async def test_profile_switch_is_refused_while_busy(harness: Harness, tmp_path: 
     await turn
     await harness.manager.stop_all()
     assert harness.manager.profile == "default"
+
+
+def test_build_env_drops_the_bridge_virtualenv(tmp_path: Path) -> None:
+    from src.claude_session import build_env
+    from src.config import PROJECT_ROOT
+
+    venv = PROJECT_ROOT / ".venv"
+    base = {
+        "VIRTUAL_ENV": str(venv),
+        "PATH": f"{venv}/bin:/home/u/.local/bin:/usr/bin",
+        "HOME": "/home/u",
+    }
+    config = SessionConfig(("claude",), ("Read",), tmp_path / "s", 300, 300, "p")
+    env = build_env(config, "p", base)
+    assert "VIRTUAL_ENV" not in env
+    assert env["PATH"] == "/home/u/.local/bin:/usr/bin"
+
+
+def test_build_env_keeps_a_foreign_virtualenv(tmp_path: Path) -> None:
+    from src.claude_session import build_env
+
+    base = {"VIRTUAL_ENV": "/work/.venv", "PATH": "/work/.venv/bin:/usr/bin"}
+    config = SessionConfig(("claude",), ("Read",), tmp_path / "s", 300, 300, "p")
+    env = build_env(config, "p", base)
+    assert env["VIRTUAL_ENV"] == "/work/.venv"
+    assert env["PATH"] == "/work/.venv/bin:/usr/bin"

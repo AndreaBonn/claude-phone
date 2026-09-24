@@ -27,6 +27,8 @@ HOOK_TIMEOUT_MARGIN = 30
 SECRET_ENV_VARS = ("TELEGRAM_BOT_TOKEN", "ANTHROPIC_API_KEY")
 SESSION_NOT_FOUND_MARKER = "No conversation found"
 CONFIG_DIR_ENV = "CLAUDE_CONFIG_DIR"
+VIRTUAL_ENV_VAR = "VIRTUAL_ENV"
+BRIDGE_VENV = PROJECT_ROOT / ".venv"
 
 EventCallback = Callable[[StreamEvent], Awaitable[None]]
 
@@ -93,12 +95,29 @@ def build_command(config: SessionConfig, session_id: str | None) -> list[str]:
     return command
 
 
+def _without_bridge_venv(env: dict[str, str]) -> dict[str, str]:
+    """Undo what `uv run` did to the bot's environment.
+
+    `uv run` puts the bridge's .venv first in PATH and sets VIRTUAL_ENV; inherited
+    by claude, every `python3` in hooks and Bash became the bridge interpreter
+    (the user's verify.sh failed on a missing pyyaml). A foreign venv is kept.
+    """
+    if env.get(VIRTUAL_ENV_VAR) != str(BRIDGE_VENV):
+        return env
+    venv_bin = str(BRIDGE_VENV / "bin")
+    cleaned = {key: value for key, value in env.items() if key != VIRTUAL_ENV_VAR}
+    entries = env.get("PATH", "").split(os.pathsep)
+    cleaned["PATH"] = os.pathsep.join(entry for entry in entries if entry != venv_bin)
+    return cleaned
+
+
 def build_env(config: SessionConfig, project: str, base: Mapping[str, str]) -> dict[str, str]:
-    """Child environment: bridge variables in, bot secrets out.
+    """Child environment: bridge variables in, bot secrets and bot venv out.
 
     Claude can run `env` through Bash, so the bot token must never reach it.
     """
     env = {key: value for key, value in base.items() if key not in SECRET_ENV_VARS}
+    env = _without_bridge_venv(env)
     env[SOCKET_ENV] = str(config.gate_socket)
     env[PROJECT_ENV] = project
     env[TIMEOUT_ENV] = str(config.approval_timeout + HOOK_TIMEOUT_MARGIN)
