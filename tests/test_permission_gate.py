@@ -235,3 +235,66 @@ async def test_hook_end_to_end_unlisted_mcp_tool_needs_approval(
 async def test_hook_denies_when_bridge_is_down(root: Path, socket_path: Path) -> None:
     stdout = await run_hook(socket_path, root, "Read", {"file_path": "a.py"})
     assert decision_of(stdout) == "deny"
+
+
+async def test_malformed_socket_request_still_gets_a_deny(root: Path, socket_path: Path) -> None:
+    broker, _, _ = make_broker(root, FakePresenter())
+    await broker.start(socket_path)
+    try:
+        reader, writer = await asyncio.open_unix_connection(str(socket_path))
+        writer.write(b"this is not json\n")
+        await writer.drain()
+        response = json.loads(await asyncio.wait_for(reader.readline(), WAIT_TIMEOUT))
+        writer.close()
+    finally:
+        await broker.stop()
+    assert response["decision"] == "deny"
+
+
+async def test_stop_before_start_is_safe(root: Path) -> None:
+    broker, _, _ = make_broker(root, FakePresenter())
+    await broker.stop()
+    assert broker.pending() == []
+
+
+async def test_broker_works_without_audit_and_stop_callbacks(root: Path) -> None:
+    presenter = FakePresenter(answer=ApprovalDecision.DENY_AND_STOP)
+    policy = GatePolicy(
+        sandbox=Sandbox(roots=(root,)),
+        allowed_tools=frozenset({"Bash"}),
+        auto_approve_tools=frozenset({"Read"}),
+    )
+    broker = ApprovalBroker(policy=policy, presenter=presenter, timeout_seconds=WAIT_TIMEOUT)
+    presenter.broker = broker
+    response = await broker.handle_request(request(root, "Bash", {"command": "ls"}))
+    assert (response["decision"], response["stop"]) == ("deny", True)
+
+
+class ClosingFailsPresenter(FakePresenter):
+    async def close(self, request: ApprovalRequest, decision: ApprovalDecision, note: str) -> None:
+        raise ConnectionError("telegram down")
+
+
+async def test_timeout_denies_even_if_the_prompt_cannot_be_updated(root: Path) -> None:
+    broker, _, _ = make_broker(root, ClosingFailsPresenter(), timeout=0.05)
+    response = await broker.handle_request(request(root, "Bash", {"command": "ls"}))
+    assert response["decision"] == "deny"
+
+
+async def test_request_without_cwd_is_blocked(root: Path) -> None:
+    presenter = FakePresenter(answer=ApprovalDecision.APPROVE)
+    broker, _, _ = make_broker(root, presenter)
+    response = await broker.handle_request({"project": "alpha", "tool_name": "Read"})
+    assert response["decision"] == "deny"
+    assert presenter.shown == []
+
+
+async def test_cancel_does_not_override_an_answer_already_given(root: Path) -> None:
+    presenter = FakePresenter()
+    broker, _, _ = make_broker(root, presenter)
+    task = asyncio.create_task(broker.handle_request(request(root, "Bash", {"command": "ls"})))
+    await wait_until(lambda: bool(presenter.shown), "approval prompt shown")
+    broker.resolve(presenter.shown[0].approval_id, ApprovalDecision.APPROVE)
+    await broker.cancel(project="alpha")
+    assert (await asyncio.wait_for(task, WAIT_TIMEOUT))["decision"] == "allow"
+    assert presenter.closed == []

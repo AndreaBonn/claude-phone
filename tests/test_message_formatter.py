@@ -117,3 +117,32 @@ def test_describe_event_shows_injected_context_as_one_line() -> None:
     event = ContextEvent(text="Stop hook feedback:\nSuite rossa\nTraceback ...")
     assert describe_event(event, verbose=1) == "📎 Stop hook feedback:"
     assert describe_event(event, verbose=0) is None
+
+
+def test_format_approval_request_write_shows_file_content() -> None:
+    text = format_approval_request(
+        project="p", tool_name="Write", tool_input={"file_path": "/s/a.md", "content": "# <Title>"}
+    )
+    assert "<code>/s/a.md</code>" in text
+    assert "<pre># &lt;Title&gt;</pre>" in text
+
+
+def test_format_approval_request_without_body_has_no_empty_block() -> None:
+    text = format_approval_request(project="p", tool_name="Bash", tool_input={"command": "  "})
+    assert "<pre>" not in text
+
+
+def test_format_tool_line_path_tool_without_path_falls_back_to_other_fields() -> None:
+    assert format_tool_line(name="Edit", tool_input={"description": "fix"}, verbose=1) == (
+        "✏️ Edit: fix"
+    )
+
+
+def test_format_approval_request_mcp_tool_shows_its_arguments() -> None:
+    text = format_approval_request(
+        project="p",
+        tool_name="mcp__aws__call_aws",
+        tool_input={"cli_command": "aws s3 rm s3://bucket --recursive"},
+    )
+    assert "<b>mcp__aws__call_aws</b>" in text
+    assert "aws s3 rm s3://bucket --recursive" in text

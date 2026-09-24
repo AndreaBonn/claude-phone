@@ -73,6 +73,11 @@ def main() -> None:
             sys.stderr.flush()
         if scenario in ("hang", "stubborn"):
             time.sleep(60)
+        if scenario == "slow":
+            time.sleep(0.5)
+        if scenario == "silent":
+            result(session_id, "")
+            continue
         emit(
             {
                 "type": "assistant",

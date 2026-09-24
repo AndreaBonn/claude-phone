@@ -1,6 +1,9 @@
 import asyncio
+import html
+import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from types import SimpleNamespace
 from typing import Any
 
 from telegram.error import BadRequest, Forbidden
@@ -15,6 +18,13 @@ class SentMessage:
     reply_markup: Any = None
     deleted: bool = False
     edits: list[str] = field(default_factory=list)
+
+    @property
+    def shown(self) -> str:
+        """Text as the user sees it: tags dropped and entities decoded for HTML."""
+        if not self.parse_mode:
+            return self.text
+        return html.unescape(re.sub(r"<[^>]+>", "", self.text))
 
 
 class FakeBot:
@@ -57,6 +67,7 @@ class FakeBot:
         if message.text == text and message.reply_markup == reply_markup:
             raise BadRequest("Message is not modified")
         message.text = text
+        message.parse_mode = parse_mode
         message.reply_markup = reply_markup
         message.edits.append(text)
         return message
@@ -77,3 +88,28 @@ async def wait_until(condition: Callable[[], bool], description: str, timeout: f
         if loop.time() > deadline:
             raise AssertionError(f"timed out waiting for: {description}")
         await asyncio.sleep(0.01)
+
+
+class FakeCallbackQuery:
+    """Callback query double: records answers, edits and dropped keyboards."""
+
+    def __init__(self, data: str | None, chat_id: int, fail_markup_edit: bool = False) -> None:
+        self.data = data
+        self.message = SimpleNamespace(chat=SimpleNamespace(id=chat_id))
+        self.answers: list[str | None] = []
+        self.edited_text: str | None = None
+        self.edited_markup: Any = None
+        self.markup_dropped = False
+        self._fail_markup_edit = fail_markup_edit
+
+    async def answer(self, text: str | None = None) -> None:
+        self.answers.append(text)
+
+    async def edit_message_text(self, text: str, reply_markup: Any = None) -> None:
+        self.edited_text = text
+        self.edited_markup = reply_markup
+
+    async def edit_message_reply_markup(self, reply_markup: Any = None) -> None:
+        if self._fail_markup_edit:
+            raise BadRequest("Message to edit not found")
+        self.markup_dropped = reply_markup is None

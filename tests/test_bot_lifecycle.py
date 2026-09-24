@@ -145,3 +145,24 @@ def test_main_logs_fatal_errors_redacted_and_releases_the_lock(
     assert SECRET_TOKEN not in log
     assert isolated_main["umask"] == [bot_module.PRIVATE_UMASK]
     acquire_instance_lock().close()
+
+
+def test_main_runs_polling_and_redacts_the_api_key(
+    isolated_main: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    api_key = "sk-ant-SECRETKEY"
+    calls: list[dict[str, Any]] = []
+
+    class PollingApp:
+        def run_polling(self, **kwargs: Any) -> None:
+            calls.append(kwargs)
+            logging.getLogger("test").info("key in use: %s", api_key)
+
+    values = {**isolated_main["values"], "anthropic_api_key": api_key}
+    monkeypatch.setattr(bot_module, "Settings", lambda: make_isolated_settings(values))
+    monkeypatch.setattr(bot_module, "build_application", lambda _settings: PollingApp())
+    assert bot_module.main() == 0
+    assert calls[0]["drop_pending_updates"] is True
+    log = isolated_main["log"].read_text()
+    assert "key in use: ***" in log
+    assert api_key not in log

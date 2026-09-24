@@ -35,27 +35,31 @@ def bot() -> FakeBot:
     return FakeBot()
 
 
+def make_bridge(tmp_path: Path, bot: FakeBot, **overrides: Any) -> BridgeContext:
+    """A real bridge over temporary dirs, driving tests/fake_claude.py."""
+    (tmp_path / "sandbox" / "alpha").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "sandbox" / "beta").mkdir(exist_ok=True)
+    (tmp_path / "profiles" / "sales").mkdir(parents=True, exist_ok=True)
+    values: dict[str, Any] = {
+        "telegram_bot_token": "1:x",
+        "allowed_users": str(USER),
+        "approved_directory": str(tmp_path / "sandbox"),
+        "claude_bin": f"{sys.executable} {FAKE_CLAUDE}",
+        "db_path": str(tmp_path / "bridge.db"),
+        "gate_socket_path": str(tmp_path / "g.sock"),
+        "approval_timeout_seconds": 5,
+        "claude_profiles_dir": str(tmp_path / "profiles"),
+    }
+    bridge = build_bridge(make_isolated_settings({**values, **overrides}), bot)
+    bridge.store.set_active_project(USER, ALPHA)
+    return bridge
+
+
 @pytest.fixture
 def bridge(
     tmp_path: Path, bot: FakeBot, monkeypatch: pytest.MonkeyPatch
 ) -> Iterator[BridgeContext]:
     monkeypatch.setenv("FAKE_SCENARIO", "echo")
-    (tmp_path / "sandbox" / "alpha").mkdir(parents=True)
-    (tmp_path / "sandbox" / "beta").mkdir()
-    (tmp_path / "profiles" / "sales").mkdir(parents=True)
-    settings = make_isolated_settings(
-        {
-            "telegram_bot_token": "1:x",
-            "allowed_users": str(USER),
-            "approved_directory": str(tmp_path / "sandbox"),
-            "claude_bin": f"{sys.executable} {FAKE_CLAUDE}",
-            "db_path": str(tmp_path / "bridge.db"),
-            "gate_socket_path": str(tmp_path / "g.sock"),
-            "approval_timeout_seconds": 5,
-            "claude_profiles_dir": str(tmp_path / "profiles"),
-        }
-    )
-    bridge = build_bridge(settings, bot)
-    bridge.store.set_active_project(USER, ALPHA)
+    bridge = make_bridge(tmp_path, bot)
     yield bridge
     bridge.store.close()

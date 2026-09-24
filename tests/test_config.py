@@ -103,3 +103,13 @@ def test_format_config_error_never_prints_input_values(tmp_path: Path) -> None:
     text = format_config_error(caught.value)
     assert "TOPSECRET" not in text
     assert "inside the bridge" in text
+
+
+def test_settings_rejects_empty_sandbox_list(tmp_path: Path) -> None:
+    with pytest.raises(ValidationError, match="at least one directory"):
+        make_settings(tmp_path, approved_directory=" , ")
+
+
+def test_settings_rejects_socket_path_too_long_for_unix(tmp_path: Path) -> None:
+    with pytest.raises(ValidationError, match="GATE_SOCKET_PATH too long"):
+        make_settings(tmp_path, gate_socket_path="/tmp/" + "s" * 120 + ".sock")

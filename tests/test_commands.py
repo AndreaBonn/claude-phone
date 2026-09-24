@@ -171,3 +171,11 @@ async def test_text_without_project_asks_to_choose_one(bridge: BridgeContext, bo
 async def test_update_without_text_is_ignored(bridge: BridgeContext, bot: FakeBot) -> None:
     await messages.handle_text(*text_message(bridge, bot, None))
     assert bot.messages == []
+
+
+async def test_projects_without_any_project_says_so(bridge: BridgeContext, bot: FakeBot) -> None:
+    for name in ("alpha", "beta"):
+        (bridge.settings.approved_directory[0] / name).rmdir()
+    await commands.projects(*command(bridge, bot))
+    assert last_text(bot).startswith("Nessun progetto in ")
+    assert bot.messages[-1].reply_markup is None

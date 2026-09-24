@@ -311,3 +311,15 @@ def test_build_env_passes_the_api_key_only_when_configured(tmp_path: Path) -> No
     assert build_env(with_key, "p", {})["ANTHROPIC_API_KEY"] == "sk-1"
     without = SessionConfig(("c",), ("Read",), tmp_path / "s", 300, 300, "p")
     assert "ANTHROPIC_API_KEY" not in build_env(without, "p", {"ANTHROPIC_API_KEY": "leaked"})
+
+
+async def test_session_id_is_read_from_the_live_session(harness: Harness) -> None:
+    outcome = await harness.manager.run_turn(PROJECT, "hi", harness.on_event)
+    live = harness.manager.session_id(PROJECT)
+    await harness.manager.stop_all()
+    assert live == outcome.result.session_id
+
+
+def test_request_stop_for_an_idle_project_is_a_no_op(harness: Harness) -> None:
+    harness.manager.request_stop("sandbox/never-used")
+    assert harness.manager.is_running("sandbox/never-used") is False

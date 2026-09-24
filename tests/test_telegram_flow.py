@@ -307,3 +307,37 @@ async def test_auth_error_tells_how_to_log_in_again(
     await bridge.sessions.stop_all()
     answer = bot.messages[-1].text
     assert "/profile" in answer and "/login" in answer and "default" in answer
+
+
+async def test_reselecting_the_active_project_keeps_claude_running(
+    bridge: BridgeContext, bot: FakeBot
+) -> None:
+    await run_user_turn(bridge, bot, turn("hello"))
+    await switch_project(bridge, USER, ALPHA)
+    running = bridge.sessions.is_running(ALPHA)
+    await bridge.sessions.stop_all()
+    assert running is True
+
+
+async def test_switching_project_stops_the_previous_claude_process(
+    bridge: BridgeContext, bot: FakeBot
+) -> None:
+    await run_user_turn(bridge, bot, turn("hello"))
+    await switch_project(bridge, USER, BETA)
+    assert bridge.sessions.is_running(ALPHA) is False
+
+
+def test_project_keyboard_is_absent_without_projects() -> None:
+    from src.handlers.projects import project_keyboard
+
+    assert project_keyboard([], active=None) is None
+
+
+async def test_new_turn_invalidates_old_choice_buttons_of_the_same_project(
+    bridge: BridgeContext, bot: FakeBot
+) -> None:
+    await run_user_turn(bridge, bot, turn("Pick\n[[option: A]]"))
+    old_token = next(iter(bridge.choices))
+    await run_user_turn(bridge, bot, turn("plain question"))
+    await bridge.sessions.stop_all()
+    assert old_token not in bridge.choices

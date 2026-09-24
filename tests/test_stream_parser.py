@@ -103,3 +103,20 @@ def test_parse_line_marks_injected_user_text_as_context() -> None:
         ContextEvent(text="Base directory for this skill: /x\n\n# Skill body"),
         ToolResultEvent(tool_use_id="t1", is_error=False, content="ok"),
     ]
+
+
+def test_parse_line_tool_result_with_unexpected_content_type_is_empty() -> None:
+    payload = {
+        "type": "user",
+        "message": {"content": [{"type": "tool_result", "tool_use_id": "t", "content": 42}]},
+    }
+    assert parse_line(line(payload)) == [
+        ToolResultEvent(tool_use_id="t", is_error=False, content="")
+    ]
+
+
+def test_parse_line_user_message_as_plain_string_is_context() -> None:
+    payload = {"type": "user", "message": {"content": "Stop hook feedback: red"}}
+    assert parse_line(line(payload)) == [ContextEvent(text="Stop hook feedback: red")]
+    blank = {"type": "user", "message": {"content": "   "}}
+    assert parse_line(line(blank)) == []

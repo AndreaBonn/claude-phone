@@ -116,9 +116,7 @@ def test_resolve_project_rejects_a_symlink_to_a_nested_directory(
         ProjectManager(sandbox).resolve_project("Progetti/shortcut")
 
 
-def test_list_projects_hides_entries_that_cannot_be_selected(
-    sandbox: Sandbox, base: Path
-) -> None:
+def test_list_projects_hides_entries_that_cannot_be_selected(sandbox: Sandbox, base: Path) -> None:
     (base / "Progetti" / "alpha" / "inner").mkdir()
     (base / "Progetti" / "shortcut").symlink_to(base / "Progetti" / "alpha" / "inner")
     projects = ProjectManager(sandbox)
