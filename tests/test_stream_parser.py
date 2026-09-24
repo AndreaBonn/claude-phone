@@ -84,7 +84,9 @@ def test_parse_line_ignores_noise_and_garbage() -> None:
     assert parse_line(line({"type": "rate_limit_event"})) == []
     assert parse_line("not json at all") == []
     assert parse_line("") == []
-    assert parse_line(line({"type": "result"})) != []
+    assert parse_line(line({"type": "result"})) == [
+        ResultEvent(session_id=None, text="", is_error=False, subtype="")
+    ]
 
 
 def test_parse_line_marks_injected_user_text_as_context() -> None:

@@ -2,6 +2,7 @@
 
 import json
 import os
+import signal
 import sys
 import time
 import uuid
@@ -35,8 +36,15 @@ def main() -> None:
             handle.write(json.dumps({"argv": sys.argv[1:], "env": dict(os.environ)}) + "\n")
     resume = sys.argv[sys.argv.index("--resume") + 1] if "--resume" in sys.argv else None
     session_id = resume or str(uuid.uuid4())
+    if scenario == "stubborn":
+        # Ignores SIGTERM: only SIGKILL stops it.
+        signal.signal(signal.SIGTERM, signal.SIG_IGN)
     for line in sys.stdin:
         text = json.loads(line)["message"]["content"][0]["text"]
+        if scenario == "resumefail" and resume:
+            result(session_id, "", is_error=True, turns=0)
+            sys.stderr.write("API Error: 529 overloaded\n")
+            sys.exit(1)
         if scenario == "notfound" and resume:
             result(session_id, "", is_error=True, turns=0)
             sys.stderr.write(f"No conversation found with session ID: {resume}\n")
@@ -63,7 +71,7 @@ def main() -> None:
             # One huge stderr line with no newline, bigger than a pipe buffer.
             sys.stderr.write("x" * 300_000)
             sys.stderr.flush()
-        if scenario == "hang":
+        if scenario in ("hang", "stubborn"):
             time.sleep(60)
         emit(
             {
@@ -88,6 +96,9 @@ def main() -> None:
             }
         )
         result(session_id, f"echo: {text}")
+        if scenario == "oneshot":
+            # Exits while idle between turns, like a crash or an external kill.
+            sys.exit(0)
 
 
 if __name__ == "__main__":

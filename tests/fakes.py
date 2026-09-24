@@ -1,7 +1,9 @@
+import asyncio
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
-from telegram.error import BadRequest
+from telegram.error import BadRequest, Forbidden
 
 
 @dataclass
@@ -21,6 +23,13 @@ class FakeBot:
     def __init__(self, reject_html: bool = False) -> None:
         self.reject_html = reject_html
         self.messages: list[SentMessage] = []
+        self.commands: list[Any] = []
+        # Chats that have not started the bot: Telegram answers Forbidden.
+        self.blocked_chats: set[int] = set()
+
+    async def set_my_commands(self, commands: list[Any]) -> bool:
+        self.commands = list(commands)
+        return True
 
     def _find(self, message_id: int) -> SentMessage:
         return next(m for m in self.messages if m.message_id == message_id)
@@ -28,6 +37,8 @@ class FakeBot:
     async def send_message(
         self, chat_id: int, text: str, parse_mode: str | None = None, reply_markup: Any = None
     ) -> SentMessage:
+        if chat_id in self.blocked_chats:
+            raise Forbidden("bot can't initiate conversation with a user")
         if parse_mode and self.reject_html:
             raise BadRequest("Can't parse entities")
         message = SentMessage(chat_id, len(self.messages) + 1, text, parse_mode, reply_markup)
@@ -56,3 +67,13 @@ class FakeBot:
 
     def visible(self) -> list[SentMessage]:
         return [m for m in self.messages if not m.deleted]
+
+
+async def wait_until(condition: Callable[[], bool], description: str, timeout: float = 5.0) -> None:
+    """Poll `condition` every 10 ms; fail with `description` after `timeout` seconds."""
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout
+    while not condition():
+        if loop.time() > deadline:
+            raise AssertionError(f"timed out waiting for: {description}")
+        await asyncio.sleep(0.01)

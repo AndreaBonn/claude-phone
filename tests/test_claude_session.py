@@ -17,6 +17,7 @@ from src.project_manager import ProjectManager, Sandbox
 from src.session_manager import SessionManager
 from src.session_store import SessionStore
 from src.stream_parser import StreamEvent, ToolUseEvent
+from tests.fakes import wait_until
 
 FAKE_CLAUDE = Path(__file__).resolve().parent / "fake_claude.py"
 PROJECT = "sandbox/alpha"
@@ -256,3 +257,57 @@ def test_build_env_keeps_a_foreign_virtualenv(tmp_path: Path) -> None:
     env = build_env(config, "p", base)
     assert env["VIRTUAL_ENV"] == "/work/.venv"
     assert env["PATH"] == "/work/.venv/bin:/usr/bin"
+
+
+async def test_process_that_died_while_idle_is_restarted_and_resumed(
+    harness: Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("FAKE_SCENARIO", "oneshot")
+    first = await harness.manager.run_turn(PROJECT, "one", harness.on_event)
+    await wait_until(lambda: not harness.manager.is_running(PROJECT), "fake claude exited")
+    second = await harness.manager.run_turn(PROJECT, "two", harness.on_event)
+    await harness.manager.stop_all()
+    assert second.result.text == "echo: two"
+    assert second.result.session_id == first.result.session_id
+    argv = harness.starts()[1]["argv"]
+    assert argv[argv.index("--resume") + 1] == first.result.session_id
+
+
+async def test_failed_resume_for_another_reason_is_reported_not_reset(
+    harness: Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("FAKE_SCENARIO", "resumefail")
+    harness.store.save_session(STORE_KEY, "saved-id")
+    outcome = await harness.manager.run_turn(PROJECT, "hi", harness.on_event)
+    await harness.manager.stop_all()
+    assert outcome.result.is_error is True
+    assert outcome.fresh_session is False
+    assert harness.store.get_session(STORE_KEY) == "saved-id"
+
+
+async def test_stop_kills_a_process_that_ignores_sigterm(
+    harness: Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("FAKE_SCENARIO", "stubborn")
+    monkeypatch.setattr("src.claude_session.STOP_GRACE_SECONDS", 0.2)
+    turn = asyncio.create_task(harness.manager.run_turn(PROJECT, "hi", harness.on_event))
+    await wait_until(lambda: harness.manager.is_busy(PROJECT), "turn started")
+    await harness.manager.stop_all()
+    with pytest.raises(ClaudeCrashedError):
+        await turn
+    assert harness.manager.is_running(PROJECT) is False
+
+
+async def test_stopping_a_session_never_started_is_a_no_op(harness: Harness) -> None:
+    session = harness.manager.get(PROJECT)
+    await session.stop()
+    assert session.running is False
+
+
+def test_build_env_passes_the_api_key_only_when_configured(tmp_path: Path) -> None:
+    from src.claude_session import build_env
+
+    with_key = SessionConfig(("c",), ("Read",), tmp_path / "s", 300, 300, "p", api_key="sk-1")
+    assert build_env(with_key, "p", {})["ANTHROPIC_API_KEY"] == "sk-1"
+    without = SessionConfig(("c",), ("Read",), tmp_path / "s", 300, 300, "p")
+    assert "ANTHROPIC_API_KEY" not in build_env(without, "p", {"ANTHROPIC_API_KEY": "leaked"})

@@ -1,58 +1,19 @@
 import asyncio
-import sys
-from collections.abc import Iterator
-from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
 from telegram import Update
 
-from src.bot import build_bridge
 from src.bridge_context import BRIDGE_KEY, BridgeContext
 from src.handlers import callbacks
 from src.handlers.projects import switch_project
 from src.project_manager import SandboxError
+from src.session_store import PendingApproval
 from src.telegram_presenter import RESTART_NOTE
 from src.turn_runner import TurnRequest, run_user_turn
-from tests.conftest import make_isolated_settings
-from tests.fakes import FakeBot
-
-FAKE_CLAUDE = Path(__file__).resolve().parent / "fake_claude.py"
-USER = 42
-ALPHA = "sandbox/alpha"
-BETA = "sandbox/beta"
-
-
-@pytest.fixture
-def bot() -> FakeBot:
-    return FakeBot()
-
-
-@pytest.fixture
-def bridge(
-    tmp_path: Path, bot: FakeBot, monkeypatch: pytest.MonkeyPatch
-) -> Iterator[BridgeContext]:
-    monkeypatch.setenv("FAKE_SCENARIO", "echo")
-    (tmp_path / "sandbox" / "alpha").mkdir(parents=True)
-    (tmp_path / "sandbox" / "beta").mkdir()
-    (tmp_path / "profiles" / "sales").mkdir(parents=True)
-    settings = make_isolated_settings(
-        {
-            "telegram_bot_token": "1:x",
-            "allowed_users": str(USER),
-            "approved_directory": str(tmp_path / "sandbox"),
-            "claude_bin": f"{sys.executable} {FAKE_CLAUDE}",
-            "db_path": str(tmp_path / "bridge.db"),
-            "gate_socket_path": str(tmp_path / "g.sock"),
-            "approval_timeout_seconds": 5,
-            "claude_profiles_dir": str(tmp_path / "profiles"),
-        }
-    )
-    bridge = build_bridge(settings, bot)
-    bridge.store.set_active_project(USER, ALPHA)
-    yield bridge
-    bridge.store.close()
+from tests.conftest import ALPHA, BETA, USER
+from tests.fakes import FakeBot, wait_until
 
 
 def turn(text: str) -> TurnRequest:
@@ -130,10 +91,13 @@ async def test_approve_button_unblocks_the_gate(bridge: BridgeContext, bot: Fake
     cwd = str(bridge.settings.approved_directory[0] / "alpha")
     payload = {"project": ALPHA, "tool_name": "Bash", "tool_input": {"command": "ls"}, "cwd": cwd}
     gate = asyncio.create_task(bridge.broker.handle_request(payload))
-    await asyncio.sleep(0.05)
+    await wait_until(lambda: bool(bot.messages), "approval prompt sent")
     prompt = bot.messages[-1]
     approve = prompt.reply_markup.inline_keyboard[0][0].callback_data
-    assert bridge.store.pop_pending_approvals() != []
+    approval_id = bridge.broker.pending()[0].approval_id
+    assert bridge.store.pop_pending_approvals() == [
+        PendingApproval(approval_id, ALPHA, USER, prompt.message_id)
+    ]
     update, context, query = callback(bridge, bot, approve)
     await callbacks.handle_approval(update, context)
     assert (await asyncio.wait_for(gate, 5))["decision"] == "allow"
@@ -164,9 +128,25 @@ def test_build_application_registers_guard_first(bridge: BridgeContext) -> None:
     from src.bot import build_application
 
     app = build_application(bridge.settings)
-    assert isinstance(app.handlers[-1][0], TypeHandler)
-    assert len(app.handlers[0]) == 13
     app.bot_data[BRIDGE_KEY].store.close()
+    assert sorted(app.handlers) == [-1, 0]
+    assert [type(handler) for handler in app.handlers[-1]] == [TypeHandler]
+
+
+def test_every_advertised_command_and_button_has_a_handler(bridge: BridgeContext) -> None:
+    from telegram.ext import CallbackQueryHandler, CommandHandler
+
+    from src.bot import BOT_COMMANDS, build_application
+
+    app = build_application(bridge.settings)
+    app.bot_data[BRIDGE_KEY].store.close()
+    handlers = app.handlers[0]
+    handled = {c for h in handlers if isinstance(h, CommandHandler) for c in h.commands}
+    assert {command.command for command in BOT_COMMANDS} <= handled
+    patterns = {
+        getattr(h.pattern, "pattern", None) for h in handlers if isinstance(h, CallbackQueryHandler)
+    }
+    assert patterns == {"^ap:", "^ch:", "^pj:", "^pg:", "^pf:"}
 
 
 class BrokenBot(FakeBot):

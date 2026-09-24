@@ -17,6 +17,7 @@ from src.permission_gate import (
 )
 from src.permission_policy import GatePolicy
 from src.project_manager import Sandbox
+from tests.fakes import wait_until
 
 HOOK_SCRIPT = Path(__file__).resolve().parent.parent / "src" / "permission_hook.py"
 WAIT_TIMEOUT = 5.0
@@ -94,7 +95,7 @@ async def test_risky_tool_blocks_until_user_approves(root: Path) -> None:
     presenter = FakePresenter()
     broker, _, _ = make_broker(root, presenter)
     task = asyncio.create_task(broker.handle_request(request(root, "Bash", {"command": "ls"})))
-    await asyncio.sleep(0.05)
+    await wait_until(lambda: bool(presenter.shown), "approval prompt shown")
     assert not task.done()
     assert len(broker.pending("alpha")) == 1
     broker.resolve(presenter.shown[0].approval_id, ApprovalDecision.APPROVE)
@@ -147,7 +148,7 @@ async def test_cancel_denies_pending_requests(root: Path) -> None:
     presenter = FakePresenter()
     broker, _, _ = make_broker(root, presenter)
     task = asyncio.create_task(broker.handle_request(request(root, "Bash", {"command": "ls"})))
-    await asyncio.sleep(0.05)
+    await wait_until(lambda: bool(broker.pending("alpha")), "request pending")
     await broker.cancel(project="alpha")
     assert (await asyncio.wait_for(task, WAIT_TIMEOUT))["decision"] == "deny"
     assert len(presenter.closed) == 1
