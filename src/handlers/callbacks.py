@@ -5,7 +5,12 @@ from telegram.error import TelegramError
 from telegram.ext import ContextTypes
 
 from src.bridge_context import get_bridge
-from src.handlers.projects import switch_project
+from src.handlers.projects import (
+    find_project,
+    project_keyboard,
+    projects_text,
+    switch_project,
+)
 from src.permission_gate import ApprovalDecision
 from src.project_manager import SandboxError
 from src.telegram_presenter import DECISION_LABELS
@@ -86,10 +91,29 @@ async def handle_project_pick(update: Update, context: ContextTypes.DEFAULT_TYPE
     if fields is None:
         await query.answer(INVALID_BUTTON)
         return
-    name = fields[1]
+    name = find_project(bridge, fields[1])
     try:
+        if name is None:
+            raise SandboxError("Progetto non più disponibile: usa /projects")
         reply = await switch_project(bridge, user.id, name)
     except SandboxError as exc:
         reply = f"🚫 {exc}"
     await query.answer()
     await query.edit_message_text(reply)
+
+
+async def handle_project_page(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """`pg:<page>` — navigation arrows under the project list."""
+    bridge = get_bridge(context)
+    query = update.callback_query
+    user = update.effective_user
+    assert query is not None and user is not None
+    fields = _parse(query.data, parts=2)
+    if fields is None or not fields[1].isdigit():
+        await query.answer(INVALID_BUTTON)
+        return
+    page = int(fields[1])
+    active = bridge.store.get_active_project(user.id)
+    keyboard = project_keyboard(bridge.projects.list_projects(), active, page)
+    await query.answer()
+    await query.edit_message_text(projects_text(bridge, active, page), reply_markup=keyboard)

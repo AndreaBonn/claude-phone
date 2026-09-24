@@ -35,7 +35,7 @@ Compila `.env`:
 |---|---|
 | `TELEGRAM_BOT_TOKEN` | Il token di BotFather |
 | `ALLOWED_USERS` | Il tuo user ID Telegram (più ID separati da virgola) |
-| `APPROVED_DIRECTORY` | La cartella sandbox: ogni sua sotto-cartella è un progetto. Non può contenere questo repository |
+| `APPROVED_DIRECTORY` | Una o più cartelle radice separate da virgola. Ogni sotto-cartella diretta di una radice è un progetto, chiamato `<radice>/<cartella>` (per esempio `ProgettiPersonali/claude-phone`). Le radici devono avere nomi diversi e non essere una dentro l'altra. Se una radice contiene questo repository, il bridge viene escluso in automatico |
 | `CLAUDE_ALLOWED_TOOLS` | Strumenti che Claude può usare (default `Read,Grep,Glob,Bash,Edit,Write`) |
 | `CLAUDE_AUTO_APPROVE_TOOLS` | Strumenti approvati senza chiedere (default, sola lettura: `Read,Grep,Glob,LS`) |
 | `CLAUDE_TIMEOUT_SECONDS` | Secondi di silenzio di Claude dopo cui il turno viene chiuso. L'attesa di una tua approvazione non conta |
@@ -74,8 +74,8 @@ systemctl --user stop telegram-claude-bridge
 | Comando | Effetto |
 |---|---|
 | `/start` | Benvenuto e lista dei progetti, con un bottone per ciascuno |
-| `/projects` | Lista dei progetti, quello attivo è segnato con ▶️ |
-| `/switch <nome>` | Cambia progetto. Se esiste una sessione salvata la riprende, altrimenti ne apre una nuova |
+| `/projects` | Progetti a pagine da 20 con le frecce ⬅️ ➡️, quello attivo è segnato con ▶️ |
+| `/switch <radice>/<nome>` | Cambia progetto. Se esiste una sessione salvata la riprende, altrimenti ne apre una nuova |
 | `/new` | Chiude la sessione del progetto attivo e ne apre una pulita al prossimo messaggio |
 | `/status` | Progetto, sessione, stato di Claude, verbosità, approvazioni in attesa |
 | `/verbose 0\|1\|2` | 0 solo la risposta finale, 1 strumenti usati in tempo reale, 2 strumenti con input completo |
@@ -89,7 +89,7 @@ Tutto il resto che scrivi va a Claude Code nel progetto attivo. Mentre Claude la
 | `Read`, `Grep`, `Glob`, `LS` | Approvati in automatico |
 | `TodoWrite`, `Task`, `Agent`, `ExitPlanMode` | Approvati in automatico: non toccano file né sistema, e gli strumenti usati dai sub-agent passano comunque dal gate |
 | `Bash`, `Edit`, `Write` e qualunque altro strumento (`NotebookEdit`, `WebFetch`, …) | Messaggio con i bottoni `✅ Approva`, `❌ Nega`, `🚫 Nega e stop sessione` |
-| Qualunque percorso fuori da `APPROVED_DIRECTORY` | Bloccato sempre, anche se approveresti |
+| Qualunque percorso fuori dalle radici di `APPROVED_DIRECTORY`, o dentro la cartella del bridge | Bloccato sempre, anche se approveresti |
 
 Se non rispondi entro `APPROVAL_TIMEOUT_SECONDS` l'azione è negata. Se il bot si riavvia con richieste aperte, alla ripartenza le trovi marcate come annullate.
 
@@ -100,7 +100,7 @@ In modalità headless Claude Code non ha lo strumento `AskUserQuestion`. Il brid
 ## Sicurezza
 
 - **Whitelist**: ogni update Telegram viene controllato contro `ALLOWED_USERS` prima di qualsiasi handler.
-- **Sandbox**: i percorsi di `Read`, `Grep`, `Glob`, `Edit`, `Write` e `NotebookEdit` vengono risolti, symlink compresi, e confrontati con `APPROVED_DIRECTORY`.
+- **Sandbox**: i percorsi di `Read`, `Grep`, `Glob`, `Edit`, `Write` e `NotebookEdit` vengono risolti, symlink compresi, e confrontati con le radici di `APPROVED_DIRECTORY`. La cartella del bridge è sempre esclusa, così Claude non può leggere né modificare il gate che lo controlla. Claude può lavorare in tutte le radici, non solo nel progetto attivo.
 - **Bash**: il bridge cerca nei comandi i token che sembrano percorsi (`/…`, `~`, `..`) e blocca quelli fuori sandbox. È un controllo di superficie, non un sandbox vero: un comando può raggiungere file esterni in modi che una scansione dei token non vede. La protezione reale per `Bash` è la tua approvazione, quindi leggi il comando prima di premere ✅.
 - **Gate fail-closed**: se il bot non risponde, se l'hook va in errore o se Telegram non è raggiungibile, l'azione è negata.
 - **Segreti**: il token del bot non viene passato a Claude Code (che potrebbe leggerlo con `env`) e viene oscurato nei log.

@@ -20,6 +20,8 @@ from tests.fakes import FakeBot
 
 FAKE_CLAUDE = Path(__file__).resolve().parent / "fake_claude.py"
 USER = 42
+ALPHA = "sandbox/alpha"
+BETA = "sandbox/beta"
 
 
 @pytest.fixture
@@ -46,20 +48,20 @@ def bridge(
         }
     )
     bridge = build_bridge(settings, bot)
-    bridge.store.set_active_project(USER, "alpha")
+    bridge.store.set_active_project(USER, ALPHA)
     yield bridge
     bridge.store.close()
 
 
 def turn(text: str) -> TurnRequest:
-    return TurnRequest(chat_id=USER, user_id=USER, project="alpha", text=text)
+    return TurnRequest(chat_id=USER, user_id=USER, project=ALPHA, text=text)
 
 
 async def test_turn_shows_progress_then_answer(bridge: BridgeContext, bot: FakeBot) -> None:
     await run_user_turn(bridge, bot, turn("hello"))
     await bridge.sessions.stop_all()
     progress, answer = bot.messages
-    assert progress.text.startswith("✅ alpha: completato")
+    assert progress.text.startswith(f"✅ {ALPHA}: completato")
     assert "📖 Read: a.py" in progress.text
     assert answer.text == "echo: hello"
     assert bridge.store.recent_audit(limit=1)[0].detail == "hello"
@@ -88,16 +90,16 @@ async def test_crashed_turn_is_reported_not_left_working(
     monkeypatch.setenv("FAKE_SCENARIO", "crash")
     await run_user_turn(bridge, bot, turn("hello"))
     progress, error = bot.messages
-    assert progress.text.startswith("❌ alpha: interrotto")
+    assert progress.text.startswith(f"❌ {ALPHA}: interrotto")
     assert "boom" in error.text
 
 
 async def test_switch_project_sets_active_and_rejects_traversal(bridge: BridgeContext) -> None:
-    reply = await switch_project(bridge, USER, "beta")
-    assert bridge.store.get_active_project(USER) == "beta"
+    reply = await switch_project(bridge, USER, BETA)
+    assert bridge.store.get_active_project(USER) == BETA
     assert "Nuova sessione" in reply
-    bridge.store.save_session("alpha", "abcdef123456")
-    assert "abcdef12" in await switch_project(bridge, USER, "alpha")
+    bridge.store.save_session(ALPHA, "abcdef123456")
+    assert "abcdef12" in await switch_project(bridge, USER, ALPHA)
     with pytest.raises(SandboxError):
         await switch_project(bridge, USER, "../..")
 
@@ -123,8 +125,8 @@ def callback(bridge: BridgeContext, bot: FakeBot, data: str) -> tuple[Update, An
 
 
 async def test_approve_button_unblocks_the_gate(bridge: BridgeContext, bot: FakeBot) -> None:
-    cwd = str(bridge.settings.approved_directory / "alpha")
-    payload = {"project": "alpha", "tool_name": "Bash", "tool_input": {"command": "ls"}, "cwd": cwd}
+    cwd = str(bridge.settings.approved_directory[0] / "alpha")
+    payload = {"project": ALPHA, "tool_name": "Bash", "tool_input": {"command": "ls"}, "cwd": cwd}
     gate = asyncio.create_task(bridge.broker.handle_request(payload))
     await asyncio.sleep(0.05)
     prompt = bot.messages[-1]
@@ -147,7 +149,7 @@ async def test_leftover_approvals_are_cancelled_on_restart(
     bridge: BridgeContext, bot: FakeBot
 ) -> None:
     prompt = await bot.send_message(chat_id=USER, text="🔐 Bash")
-    bridge.store.add_pending_approval("old1", "alpha", USER, prompt.message_id)
+    bridge.store.add_pending_approval("old1", ALPHA, USER, prompt.message_id)
     assert await bridge.presenter.cancel_leftovers() == 1
     assert prompt.text == RESTART_NOTE
     assert "1 richieste" in bot.messages[-1].text
@@ -161,7 +163,7 @@ def test_build_application_registers_guard_first(bridge: BridgeContext) -> None:
 
     app = build_application(bridge.settings)
     assert isinstance(app.handlers[-1][0], TypeHandler)
-    assert len(app.handlers[0]) == 10
+    assert len(app.handlers[0]) == 11
     app.bot_data[BRIDGE_KEY].store.close()
 
 
@@ -180,11 +182,11 @@ async def test_turn_survives_telegram_failure_on_progress(bridge: BridgeContext)
 async def test_choice_button_goes_to_its_own_project(bridge: BridgeContext, bot: FakeBot) -> None:
     await run_user_turn(bridge, bot, turn("Pick\n[[option: Keep A]]"))
     button = bot.messages[-1].reply_markup.inline_keyboard[0][0].callback_data
-    await switch_project(bridge, USER, "beta")
+    await switch_project(bridge, USER, BETA)
     update, context, _ = callback(bridge, bot, button)
     await callbacks.handle_choice(update, context)
     await bridge.sessions.stop_all()
-    assert bridge.store.recent_audit(limit=1)[0].project == "alpha"
+    assert bridge.store.recent_audit(limit=1)[0].project == ALPHA
     assert bot.messages[-1].text == "echo: Keep A"
 
 
@@ -192,7 +194,7 @@ async def test_turn_on_other_project_keeps_existing_choices(
     bridge: BridgeContext, bot: FakeBot
 ) -> None:
     await run_user_turn(bridge, bot, turn("Pick\n[[option: Keep A]]"))
-    other = TurnRequest(chat_id=USER, user_id=USER, project="beta", text="hi")
+    other = TurnRequest(chat_id=USER, user_id=USER, project=BETA, text="hi")
     await run_user_turn(bridge, bot, other)
     await bridge.sessions.stop_all()
     assert len(bridge.choices) == 1
@@ -206,3 +208,55 @@ async def test_malformed_callback_data_is_answered(bridge: BridgeContext, bot: F
         update, context, query = callback(bridge, bot, data)
         await handler(update, context)
         assert query.answers, data
+
+
+async def test_project_button_switches_via_short_token(bridge: BridgeContext, bot: FakeBot) -> None:
+    from src.handlers.projects import project_keyboard
+
+    keyboard = project_keyboard(bridge.projects.list_projects(), active=ALPHA)
+    assert keyboard is not None
+    data = keyboard.inline_keyboard[1][0].callback_data
+    assert isinstance(data, str) and len(data.encode()) <= 64
+
+    class PickQuery(FakeQuery):
+        edited: str = ""
+
+        async def edit_message_text(self, text: str) -> None:
+            self.edited = text
+
+    query = PickQuery(data)
+    update = SimpleNamespace(callback_query=query, effective_user=SimpleNamespace(id=USER))
+    context = SimpleNamespace(application=SimpleNamespace(bot_data={BRIDGE_KEY: bridge}), bot=bot)
+    await callbacks.handle_project_pick(cast(Update, update), cast(Any, context))
+    assert bridge.store.get_active_project(USER) == BETA
+    assert BETA in query.edited
+
+
+def test_project_keyboard_paginates_under_telegram_button_limit() -> None:
+    from src.handlers.projects import PAGE_PREFIX, PAGE_SIZE, project_keyboard
+
+    projects = [f"Root/p{i:03d}" for i in range(113)]
+    first = project_keyboard(projects, active=None)
+    last = project_keyboard(projects, active=None, page=99)
+    assert first is not None and last is not None
+    buttons = [b for row in first.inline_keyboard for b in row]
+    assert len(buttons) <= PAGE_SIZE + 2
+    assert buttons[0].text == "Root/p000"
+    assert first.inline_keyboard[-1][-1].callback_data == f"{PAGE_PREFIX}:1"
+    last_buttons = [b.text for row in last.inline_keyboard for b in row]
+    assert "Root/p112" in last_buttons
+    assert all(b.callback_data != f"{PAGE_PREFIX}:6" for row in last.inline_keyboard for b in row)
+
+
+async def test_page_button_edits_the_project_list(bridge: BridgeContext, bot: FakeBot) -> None:
+    class PageQuery(FakeQuery):
+        markup: Any = None
+
+        async def edit_message_text(self, text: str, reply_markup: Any = None) -> None:
+            self.markup = reply_markup
+
+    query = PageQuery("pg:0")
+    update = SimpleNamespace(callback_query=query, effective_user=SimpleNamespace(id=USER))
+    context = SimpleNamespace(application=SimpleNamespace(bot_data={BRIDGE_KEY: bridge}), bot=bot)
+    await callbacks.handle_project_page(cast(Update, update), cast(Any, context))
+    assert [row[0].text for row in query.markup.inline_keyboard] == [f"▶️ {ALPHA}", BETA]

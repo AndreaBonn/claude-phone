@@ -9,6 +9,7 @@ from src.permission_policy import (
     GatePolicy,
     classify_tool_call,
 )
+from src.project_manager import Sandbox
 
 
 @pytest.fixture
@@ -20,14 +21,14 @@ def root(tmp_path: Path) -> Path:
 @pytest.fixture
 def policy(root: Path) -> GatePolicy:
     return GatePolicy(
-        root=root,
+        sandbox=Sandbox(roots=(root,), excluded=(root / "bridge",)),
         allowed_tools=frozenset({"Read", "Grep", "Glob", "Bash", "Edit", "Write"}),
         auto_approve_tools=frozenset({"Read", "Grep", "Glob", "LS"}),
     )
 
 
 def classify(policy: GatePolicy, tool: str, tool_input: dict[str, Any]) -> GateAction:
-    cwd = policy.root / "alpha"
+    cwd = policy.sandbox.roots[0] / "alpha"
     return classify_tool_call(tool_name=tool, tool_input=tool_input, cwd=cwd, policy=policy).action
 
 
@@ -85,7 +86,7 @@ def test_unparseable_bash_asks_with_warning(policy: GatePolicy) -> None:
     verdict = classify_tool_call(
         tool_name="Bash",
         tool_input={"command": "cat <<EOF\ndon't\nEOF"},
-        cwd=policy.root / "alpha",
+        cwd=policy.sandbox.roots[0] / "alpha",
         policy=policy,
     )
     assert verdict.action is GateAction.ASK
@@ -115,3 +116,17 @@ def test_cwd_outside_sandbox_blocks_everything(policy: GatePolicy, tmp_path: Pat
         tool_name="Read", tool_input={"file_path": "x"}, cwd=tmp_path, policy=policy
     )
     assert verdict.action is GateAction.BLOCK
+
+
+@pytest.mark.parametrize(
+    ("tool", "tool_input"),
+    [
+        ("Read", {"file_path": "../bridge/src/permission_hook.py"}),
+        ("Edit", {"file_path": "../bridge/src/permission_policy.py"}),
+        ("Bash", {"command": "cat ../bridge/.env"}),
+    ],
+)
+def test_bridge_directory_is_blocked_even_for_auto_tools(
+    policy: GatePolicy, tool: str, tool_input: dict[str, Any]
+) -> None:
+    assert classify(policy, tool, tool_input) is GateAction.BLOCK

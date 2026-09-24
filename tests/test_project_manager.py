@@ -2,64 +2,96 @@ from pathlib import Path
 
 import pytest
 
-from src.project_manager import ProjectManager, SandboxError, is_within, resolve_in_sandbox
+from src.project_manager import ProjectManager, Sandbox, SandboxError
 
 
 @pytest.fixture
-def sandbox(tmp_path: Path) -> Path:
-    root = tmp_path / "sandbox"
-    (root / "alpha").mkdir(parents=True)
-    (root / "beta").mkdir()
-    (root / ".hidden").mkdir()
-    (root / "notes.txt").write_text("x")
+def base(tmp_path: Path) -> Path:
+    work = tmp_path / "Progetti"
+    (work / "alpha").mkdir(parents=True)
+    (work / ".hidden").mkdir()
+    (work / "notes.txt").write_text("x")
+    personal = tmp_path / "Personali"
+    (personal / "alpha").mkdir(parents=True)
+    (personal / "bridge").mkdir()
     outside = tmp_path / "outside"
     outside.mkdir()
-    (root / "escape").symlink_to(outside)
-    return root.resolve()
+    (work / "escape").symlink_to(outside)
+    return tmp_path.resolve()
 
 
-def test_list_projects_returns_only_visible_dirs_inside_sandbox(sandbox: Path) -> None:
-    assert ProjectManager(sandbox).list_projects() == ["alpha", "beta"]
+@pytest.fixture
+def sandbox(base: Path) -> Sandbox:
+    return Sandbox(
+        roots=(base / "Progetti", base / "Personali"),
+        excluded=(base / "Personali" / "bridge",),
+    )
 
 
-def test_resolve_project_returns_resolved_path(sandbox: Path) -> None:
-    assert ProjectManager(sandbox).resolve_project("alpha") == sandbox / "alpha"
+def test_list_projects_spans_roots_and_skips_excluded(sandbox: Sandbox) -> None:
+    assert ProjectManager(sandbox).list_projects() == ["Progetti/alpha", "Personali/alpha"]
+
+
+def test_resolve_project_returns_path_in_the_right_root(sandbox: Sandbox, base: Path) -> None:
+    projects = ProjectManager(sandbox)
+    assert projects.resolve_project("Personali/alpha") == base / "Personali" / "alpha"
+    assert projects.resolve_project("Progetti/alpha") == base / "Progetti" / "alpha"
 
 
 @pytest.mark.parametrize(
-    "name", ["../../etc/passwd", "..", ".", "", "alpha/../..", "/etc", ".hidden", "escape"]
+    "project_id",
+    [
+        "../../etc/passwd",
+        "Progetti/..",
+        "Progetti/.",
+        "Progetti/",
+        "Progetti",
+        "",
+        "Progetti/alpha/..",
+        "/etc/passwd",
+        "Progetti/.hidden",
+        "Progetti/escape",
+        "Personali/bridge",
+        "Unknown/alpha",
+    ],
 )
-def test_resolve_project_rejects_unsafe_names(sandbox: Path, name: str) -> None:
+def test_resolve_project_rejects_unsafe_ids(sandbox: Sandbox, project_id: str) -> None:
     with pytest.raises(SandboxError):
-        ProjectManager(sandbox).resolve_project(name)
+        ProjectManager(sandbox).resolve_project(project_id)
 
 
-def test_resolve_project_rejects_missing_project(sandbox: Path) -> None:
+def test_resolve_project_rejects_missing_project(sandbox: Sandbox) -> None:
     with pytest.raises(SandboxError, match="non esiste"):
-        ProjectManager(sandbox).resolve_project("gamma")
+        ProjectManager(sandbox).resolve_project("Progetti/gamma")
 
 
-def test_resolve_in_sandbox_accepts_relative_path(sandbox: Path) -> None:
-    resolved = resolve_in_sandbox(raw="src/app.py", cwd=sandbox / "alpha", root=sandbox)
-    assert resolved == sandbox / "alpha" / "src" / "app.py"
+def test_sandbox_resolve_accepts_relative_path(sandbox: Sandbox, base: Path) -> None:
+    cwd = base / "Progetti" / "alpha"
+    assert sandbox.resolve(raw="src/app.py", cwd=cwd) == cwd / "src" / "app.py"
 
 
-def test_resolve_in_sandbox_accepts_sibling_project(sandbox: Path) -> None:
-    resolved = resolve_in_sandbox(raw="../beta/x", cwd=sandbox / "alpha", root=sandbox)
-    assert resolved == sandbox / "beta" / "x"
+def test_sandbox_resolve_accepts_another_root(sandbox: Sandbox, base: Path) -> None:
+    cwd = base / "Progetti" / "alpha"
+    target = base / "Personali" / "alpha" / "x"
+    assert sandbox.resolve(raw="../../Personali/alpha/x", cwd=cwd) == target
 
 
-@pytest.mark.parametrize("raw", ["../../etc/passwd", "/etc/passwd", "~/.ssh/id_rsa", "../.."])
-def test_resolve_in_sandbox_rejects_traversal(sandbox: Path, raw: str) -> None:
+@pytest.mark.parametrize(
+    "raw", ["../../etc/passwd", "/etc/passwd", "~/.ssh/id_rsa", "../..", "escape/secret"]
+)
+def test_sandbox_resolve_rejects_paths_outside_roots(
+    sandbox: Sandbox, base: Path, raw: str
+) -> None:
     with pytest.raises(SandboxError):
-        resolve_in_sandbox(raw=raw, cwd=sandbox / "alpha", root=sandbox)
+        sandbox.resolve(raw=raw, cwd=base / "Progetti")
 
 
-def test_resolve_in_sandbox_rejects_symlink_escape(sandbox: Path) -> None:
+def test_sandbox_resolve_rejects_excluded_directory(sandbox: Sandbox, base: Path) -> None:
     with pytest.raises(SandboxError):
-        resolve_in_sandbox(raw="escape/secret", cwd=sandbox, root=sandbox)
+        sandbox.resolve(raw="../bridge/src/permission_hook.py", cwd=base / "Personali" / "alpha")
 
 
-def test_is_within_accepts_root_itself(sandbox: Path) -> None:
-    assert is_within(path=sandbox, root=sandbox) is True
-    assert is_within(path=sandbox.parent, root=sandbox) is False
+def test_sandbox_contains_roots_but_not_their_parent(sandbox: Sandbox, base: Path) -> None:
+    assert sandbox.contains(base / "Progetti") is True
+    assert sandbox.contains(base) is False
+    assert sandbox.contains(base / "Personali" / "bridge" / "x") is False

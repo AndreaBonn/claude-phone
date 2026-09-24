@@ -28,7 +28,7 @@ from src.logging_setup import setup_logging
 from src.message_formatter import summarize_tool_input, truncate
 from src.permission_gate import ApprovalBroker
 from src.permission_policy import GatePolicy
-from src.project_manager import ProjectManager
+from src.project_manager import ProjectManager, Sandbox
 from src.session_manager import SessionManager
 from src.session_store import SessionStore
 from src.telegram_io import send_text
@@ -76,9 +76,15 @@ def _session_config(settings: Settings) -> SessionConfig:
     )
 
 
+def _sandbox(settings: Settings) -> Sandbox:
+    # The bridge may live inside a root: it is carved out, so Claude can never
+    # read or rewrite its own permission gate.
+    return Sandbox(roots=settings.approved_directory, excluded=(PROJECT_ROOT,))
+
+
 def _gate_policy(settings: Settings) -> GatePolicy:
     return GatePolicy(
-        root=settings.approved_directory,
+        sandbox=_sandbox(settings),
         allowed_tools=frozenset(settings.claude_allowed_tools),
         auto_approve_tools=frozenset(settings.claude_auto_approve_tools),
     )
@@ -86,7 +92,7 @@ def _gate_policy(settings: Settings) -> GatePolicy:
 
 def build_bridge(settings: Settings, bot: Any) -> BridgeContext:
     store = SessionStore(settings.db_path)
-    projects = ProjectManager(settings.approved_directory)
+    projects = ProjectManager(_sandbox(settings))
     presenter = TelegramApprovalPresenter(bot, store, default_chat_id=min(settings.allowed_users))
     # The session manager and the broker reference each other: late-bound via a list.
     broker_ref: list[ApprovalBroker] = []
@@ -173,6 +179,7 @@ def register_handlers(app: AnyApplication, allowed_users: frozenset[int]) -> Non
     app.add_handler(CallbackQueryHandler(callbacks.handle_approval, pattern=f"^{APPROVAL_PREFIX}:"))
     app.add_handler(CallbackQueryHandler(callbacks.handle_choice, pattern=f"^{CHOICE_PREFIX}:"))
     app.add_handler(CallbackQueryHandler(callbacks.handle_project_pick, pattern=r"^pj:"))
+    app.add_handler(CallbackQueryHandler(callbacks.handle_project_page, pattern=r"^pg:"))
     app.add_error_handler(on_error)
 
 

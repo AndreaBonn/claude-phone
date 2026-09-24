@@ -13,12 +13,13 @@ from src.claude_session import (
     SessionConfig,
     build_command,
 )
-from src.project_manager import ProjectManager
+from src.project_manager import ProjectManager, Sandbox
 from src.session_manager import SessionManager
 from src.session_store import SessionStore
 from src.stream_parser import StreamEvent, ToolUseEvent
 
 FAKE_CLAUDE = Path(__file__).resolve().parent / "fake_claude.py"
+PROJECT = "sandbox/alpha"
 
 
 class Harness:
@@ -39,7 +40,7 @@ class Harness:
         self.manager = SessionManager(
             config=config,
             store=self.store,
-            projects=ProjectManager(tmp_path / "sandbox"),
+            projects=ProjectManager(Sandbox(roots=((tmp_path / "sandbox").resolve(),))),
             is_waiting_for_user=lambda _project: self.waiting,
         )
 
@@ -59,16 +60,16 @@ def harness(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Harness:
 
 
 async def test_turn_streams_events_and_returns_result(harness: Harness) -> None:
-    outcome = await harness.manager.run_turn("alpha", "hi", harness.on_event)
+    outcome = await harness.manager.run_turn(PROJECT, "hi", harness.on_event)
     await harness.manager.stop_all()
     assert outcome.result.text == "echo: hi"
     assert any(isinstance(event, ToolUseEvent) for event in harness.events)
-    assert harness.store.get_session("alpha") == outcome.result.session_id
+    assert harness.store.get_session(PROJECT) == outcome.result.session_id
 
 
 async def test_process_is_reused_across_turns(harness: Harness) -> None:
-    await harness.manager.run_turn("alpha", "one", harness.on_event)
-    outcome = await harness.manager.run_turn("alpha", "two", harness.on_event)
+    await harness.manager.run_turn(PROJECT, "one", harness.on_event)
+    outcome = await harness.manager.run_turn(PROJECT, "two", harness.on_event)
     await harness.manager.stop_all()
     assert outcome.result.text == "echo: two"
     assert len(harness.starts()) == 1
@@ -76,8 +77,8 @@ async def test_process_is_reused_across_turns(harness: Harness) -> None:
 
 async def test_concurrent_messages_are_queued_in_order(harness: Harness) -> None:
     first, second = await asyncio.gather(
-        harness.manager.run_turn("alpha", "one", harness.on_event),
-        harness.manager.run_turn("alpha", "two", harness.on_event),
+        harness.manager.run_turn(PROJECT, "one", harness.on_event),
+        harness.manager.run_turn(PROJECT, "two", harness.on_event),
     )
     await harness.manager.stop_all()
     assert (first.result.text, second.result.text) == ("echo: one", "echo: two")
@@ -85,8 +86,8 @@ async def test_concurrent_messages_are_queued_in_order(harness: Harness) -> None
 
 
 async def test_saved_session_is_resumed(harness: Harness) -> None:
-    harness.store.save_session("alpha", "saved-id")
-    outcome = await harness.manager.run_turn("alpha", "hi", harness.on_event)
+    harness.store.save_session(PROJECT, "saved-id")
+    outcome = await harness.manager.run_turn(PROJECT, "hi", harness.on_event)
     await harness.manager.stop_all()
     argv = harness.starts()[0]["argv"]
     assert argv[argv.index("--resume") + 1] == "saved-id"
@@ -97,12 +98,12 @@ async def test_missing_saved_session_falls_back_to_new_one(
     harness: Harness, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("FAKE_SCENARIO", "notfound")
-    harness.store.save_session("alpha", "gone")
-    outcome = await harness.manager.run_turn("alpha", "hi", harness.on_event)
+    harness.store.save_session(PROJECT, "gone")
+    outcome = await harness.manager.run_turn(PROJECT, "hi", harness.on_event)
     await harness.manager.stop_all()
     assert outcome.fresh_session is True
     assert outcome.result.text == "echo: hi"
-    assert harness.store.get_session("alpha") not in (None, "gone")
+    assert harness.store.get_session(PROJECT) not in (None, "gone")
 
 
 async def test_crash_mid_turn_raises_with_stderr(
@@ -110,9 +111,9 @@ async def test_crash_mid_turn_raises_with_stderr(
 ) -> None:
     monkeypatch.setenv("FAKE_SCENARIO", "crash")
     with pytest.raises(ClaudeCrashedError, match="boom"):
-        await harness.manager.run_turn("alpha", "hi", harness.on_event)
-    assert harness.manager.is_running("alpha") is False
-    assert harness.store.get_session("alpha") is not None
+        await harness.manager.run_turn(PROJECT, "hi", harness.on_event)
+    assert harness.manager.is_running(PROJECT) is False
+    assert harness.store.get_session(PROJECT) is not None
 
 
 async def test_idle_timeout_kills_process(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -120,8 +121,8 @@ async def test_idle_timeout_kills_process(tmp_path: Path, monkeypatch: pytest.Mo
     monkeypatch.setattr("src.claude_session.STOP_GRACE_SECONDS", 0.2)
     harness = Harness(tmp_path, idle_timeout=0.3)
     with pytest.raises(ClaudeTimeoutError):
-        await harness.manager.run_turn("alpha", "hi", harness.on_event)
-    assert harness.manager.is_running("alpha") is False
+        await harness.manager.run_turn(PROJECT, "hi", harness.on_event)
+    assert harness.manager.is_running(PROJECT) is False
 
 
 async def test_idle_timeout_ignores_time_waiting_for_approval(
@@ -139,33 +140,33 @@ async def test_idle_timeout_ignores_time_waiting_for_approval(
     started = time.monotonic()
     releaser = asyncio.create_task(release_later())
     with pytest.raises(ClaudeTimeoutError):
-        await harness.manager.run_turn("alpha", "hi", harness.on_event)
+        await harness.manager.run_turn(PROJECT, "hi", harness.on_event)
     elapsed = time.monotonic() - started
     await releaser
     assert elapsed >= 0.8
 
 
 async def test_child_env_has_bridge_vars_and_no_bot_token(harness: Harness) -> None:
-    await harness.manager.run_turn("alpha", "hi", harness.on_event)
+    await harness.manager.run_turn(PROJECT, "hi", harness.on_event)
     await harness.manager.stop_all()
     env = harness.starts()[0]["env"]
     assert "TELEGRAM_BOT_TOKEN" not in env
-    assert env["BRIDGE_PROJECT"] == "alpha"
+    assert env["BRIDGE_PROJECT"] == PROJECT
     assert env["BRIDGE_GATE_SOCKET"].endswith("g.sock")
 
 
 async def test_request_stop_ends_process_after_turn(harness: Harness) -> None:
-    harness.manager.get("alpha")
-    harness.manager.request_stop("alpha")
-    await harness.manager.run_turn("alpha", "hi", harness.on_event)
-    assert harness.manager.is_running("alpha") is False
+    harness.manager.get(PROJECT)
+    harness.manager.request_stop(PROJECT)
+    await harness.manager.run_turn(PROJECT, "hi", harness.on_event)
+    assert harness.manager.is_running(PROJECT) is False
 
 
 async def test_reset_forgets_session(harness: Harness) -> None:
-    await harness.manager.run_turn("alpha", "hi", harness.on_event)
-    await harness.manager.reset("alpha")
-    assert harness.store.get_session("alpha") is None
-    assert harness.manager.session_id("alpha") is None
+    await harness.manager.run_turn(PROJECT, "hi", harness.on_event)
+    await harness.manager.reset(PROJECT)
+    assert harness.store.get_session(PROJECT) is None
+    assert harness.manager.session_id(PROJECT) is None
 
 
 def test_build_command_never_skips_permissions(tmp_path: Path) -> None:
@@ -186,6 +187,6 @@ async def test_huge_stderr_line_does_not_block_the_child(
     monkeypatch.setenv("FAKE_SCENARIO", "noisy")
     monkeypatch.setattr("src.claude_session.STREAM_LIMIT", 64 * 1024)
     harness = Harness(tmp_path, idle_timeout=3.0)
-    outcome = await harness.manager.run_turn("alpha", "hi", harness.on_event)
+    outcome = await harness.manager.run_turn(PROJECT, "hi", harness.on_event)
     await harness.manager.stop_all()
     assert outcome.result.text == "echo: hi"

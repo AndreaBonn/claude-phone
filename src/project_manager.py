@@ -1,65 +1,85 @@
+from dataclasses import dataclass
 from pathlib import Path
+
+PROJECT_SEPARATOR = "/"
 
 
 class SandboxError(ValueError):
-    """A path or project name that resolves outside APPROVED_DIRECTORY."""
+    """A path or project that resolves outside the sandbox roots."""
 
 
-def is_within(path: Path, root: Path) -> bool:
-    """Tell whether `path`, with symlinks resolved, lies inside `root` (already resolved)."""
-    return path.resolve().is_relative_to(root)
+@dataclass(frozen=True)
+class Sandbox:
+    """The directories Claude may touch: several roots minus excluded sub-trees.
 
-
-def resolve_in_sandbox(raw: str, cwd: Path, root: Path) -> Path:
-    """Resolve a path coming from Telegram or Claude and enforce the sandbox.
-
-    Parameters
-    ----------
-    raw : str
-        Path as received, absolute, relative to `cwd` or starting with `~`.
-    cwd : Path
-        Directory relative paths are interpreted against.
-    root : Path
-        Resolved sandbox root.
-
-    Returns
-    -------
-    Path
-        The resolved absolute path, symlinks followed.
-
-    Raises
-    ------
-    SandboxError
-        If the resolved path is outside `root`.
+    Paths are compared after resolving symlinks, so a link pointing outside a
+    root, or into an excluded directory, is treated as what it points to.
     """
-    candidate = Path(raw).expanduser()
-    if not candidate.is_absolute():
-        candidate = cwd / candidate
-    resolved = candidate.resolve()
-    if not resolved.is_relative_to(root):
-        raise SandboxError(f"Percorso fuori dalla sandbox: {raw}")
-    return resolved
+
+    roots: tuple[Path, ...]
+    excluded: tuple[Path, ...] = ()
+
+    def contains(self, path: Path) -> bool:
+        resolved = path.resolve()
+        inside = any(resolved.is_relative_to(root) for root in self.roots)
+        return inside and not any(resolved.is_relative_to(ex) for ex in self.excluded)
+
+    def resolve(self, raw: str, cwd: Path) -> Path:
+        """Resolve a path from Telegram or Claude and enforce the sandbox.
+
+        Parameters
+        ----------
+        raw : str
+            Path as received: absolute, relative to `cwd`, or starting with `~`.
+        cwd : Path
+            Directory relative paths are interpreted against.
+
+        Returns
+        -------
+        Path
+            The resolved absolute path, symlinks followed.
+
+        Raises
+        ------
+        SandboxError
+            If the path is outside every root or inside an excluded directory.
+        """
+        candidate = Path(raw).expanduser()
+        if not candidate.is_absolute():
+            candidate = cwd / candidate
+        resolved = candidate.resolve()
+        if not self.contains(resolved):
+            raise SandboxError(f"Percorso fuori dalla sandbox: {raw}")
+        return resolved
 
 
 class ProjectManager:
-    """Projects are the direct, visible sub-directories of the sandbox root."""
+    """Projects are the visible direct sub-directories of each sandbox root.
 
-    def __init__(self, root: Path) -> None:
-        self.root = root.resolve()
+    A project id is `<root name>/<directory>`, so equal directory names in
+    different roots stay distinct.
+    """
+
+    def __init__(self, sandbox: Sandbox) -> None:
+        self.sandbox = sandbox
+        self._roots = {root.name: root for root in sandbox.roots}
 
     def list_projects(self) -> list[str]:
-        return sorted(
-            entry.name
-            for entry in self.root.iterdir()
-            if entry.is_dir() and not entry.name.startswith(".") and is_within(entry, self.root)
-        )
+        return [
+            f"{root.name}{PROJECT_SEPARATOR}{entry.name}"
+            for root in self.sandbox.roots
+            for entry in sorted(root.iterdir())
+            if entry.is_dir() and not entry.name.startswith(".") and self.sandbox.contains(entry)
+        ]
 
-    def resolve_project(self, name: str) -> Path:
-        if not name or "/" in name or name.startswith("."):
-            raise SandboxError(f"Nome progetto non valido: {name!r}")
-        path = resolve_in_sandbox(raw=name, cwd=self.root, root=self.root)
-        if path == self.root or path.parent != self.root:
-            raise SandboxError(f"Nome progetto non valido: {name!r}")
+    def resolve_project(self, project_id: str) -> Path:
+        root_name, _, name = project_id.partition(PROJECT_SEPARATOR)
+        root = self._roots.get(root_name)
+        if root is None or not name or PROJECT_SEPARATOR in name or name.startswith("."):
+            raise SandboxError(f"Progetto non valido: {project_id!r}")
+        path = self.sandbox.resolve(raw=name, cwd=root)
+        if path.parent != root:
+            raise SandboxError(f"Progetto non valido: {project_id!r}")
         if not path.is_dir():
-            raise SandboxError(f"Il progetto {name!r} non esiste")
+            raise SandboxError(f"Il progetto {project_id!r} non esiste")
         return path

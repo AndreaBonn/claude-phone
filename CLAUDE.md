@@ -25,7 +25,7 @@ uv run mypy src tests
 - Never add `--dangerously-skip-permissions` or `bypassPermissions` anywhere, not even commented out.
 - The gate is fail-closed: every error path in the hook or broker must deny.
 - Every tool not listed in the auto-approve sets must ask: never fall through to Claude's own permission rules.
-- Sandbox violations are blocked before auto-approval and before asking the user.
+- Sandbox violations are blocked before auto-approval and before asking the user. The sandbox is several roots (`APPROVED_DIRECTORY`, comma-separated) minus `PROJECT_ROOT`: the bridge is always carved out. Project ids are `<root name>/<dir>`; project buttons carry a sha256 prefix because ids overflow the 64-byte callback_data, and the list is paginated (Telegram caps inline keyboards at about 100 buttons).
 - `TELEGRAM_BOT_TOKEN` never reaches the claude child env (`claude_session.SECRET_ENV_VARS`) and is redacted by `logging_setup.SecretRedactingFormatter`, tracebacks included. Config errors are printed through `config.format_config_error`, never `str(ValidationError)`.
 - `permission_hook.py` is stdlib-only and must not import `src`: it runs inside the project directory, not the bridge's.
 - Measured protocol facts: each turn emits one `system/init` and ends with one `result`; `--resume` keeps the session id; a hook reply with `continue: false` ends the turn but keeps the process alive; resuming an unknown session yields a `result` with `num_turns: 0` plus `No conversation found` on stderr, then exit 1.

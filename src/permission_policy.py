@@ -6,7 +6,7 @@ from enum import StrEnum
 from pathlib import Path, PurePath
 from typing import Any
 
-from src.project_manager import SandboxError, is_within, resolve_in_sandbox
+from src.project_manager import Sandbox, SandboxError
 
 PATH_FIELDS = ("file_path", "path", "notebook_path")
 GLOB_CHARS = re.compile(r"[*?\[{]")
@@ -33,7 +33,7 @@ class GateVerdict:
 
 @dataclass(frozen=True)
 class GatePolicy:
-    root: Path
+    sandbox: Sandbox
     allowed_tools: frozenset[str]
     auto_approve_tools: frozenset[str]
 
@@ -72,10 +72,10 @@ def _bash_paths(command: str) -> list[str] | None:
     return paths
 
 
-def _outside(paths: list[str], cwd: Path, root: Path) -> str | None:
+def _outside(paths: list[str], cwd: Path, sandbox: Sandbox) -> str | None:
     for raw in paths:
         try:
-            resolve_in_sandbox(raw=raw, cwd=cwd, root=root)
+            sandbox.resolve(raw=raw, cwd=cwd)
         except SandboxError:
             return raw
     return None
@@ -87,13 +87,14 @@ def classify_tool_call(
     """Decide what the gate does with one tool call.
 
     Sandbox violations win over everything, including auto-approval and the
-    user's approval: a path outside APPROVED_DIRECTORY is always blocked.
+    user's approval: a path outside the sandbox roots, or inside the bridge,
+    is always blocked.
     Any tool not explicitly listed (MCP tools, WebFetch, NotebookEdit...) needs
     the user's approval: nothing falls through to Claude's own permission rules.
     The Bash check is a best-effort token scan, not a sandbox: the real guard
     for shell commands is the human approval that always follows it.
     """
-    if not is_within(path=cwd, root=policy.root):
+    if not policy.sandbox.contains(cwd):
         return GateVerdict(GateAction.BLOCK, f"Directory di lavoro fuori sandbox: {cwd}")
     paths = list(_tool_paths(tool_name, tool_input))
     warning = ""
@@ -101,7 +102,7 @@ def classify_tool_call(
         bash_paths = _bash_paths(str(tool_input.get("command", "")))
         warning = UNPARSEABLE_BASH_WARNING if bash_paths is None else ""
         paths.extend(bash_paths or [])
-    escaped = _outside(paths, cwd=cwd, root=policy.root)
+    escaped = _outside(paths, cwd=cwd, sandbox=policy.sandbox)
     if escaped is not None:
         return GateVerdict(GateAction.BLOCK, f"Percorso fuori dalla sandbox: {escaped}")
     if tool_name in policy.auto_approve_tools or tool_name in NO_EFFECT_TOOLS:

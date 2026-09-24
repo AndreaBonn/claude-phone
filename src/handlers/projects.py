@@ -1,29 +1,75 @@
+import hashlib
+
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
 from src.bridge_context import BridgeContext
 
 PROJECT_PREFIX = "pj"
-# Telegram limits callback_data to 64 bytes.
-CALLBACK_DATA_MAX_BYTES = 64
+# Project ids like "ProgettiPersonali/<repo>" overflow Telegram's 64-byte
+# callback_data, so buttons carry a short digest resolved against the list.
+PROJECT_TOKEN_LENGTH = 16
+PAGE_PREFIX = "pg"
+PAGE_SIZE = 20
 
 
-def project_keyboard(projects: list[str], active: str | None) -> InlineKeyboardMarkup | None:
-    """One button per project; names too long for callback_data need /switch."""
-    rows = []
-    for name in projects:
-        data = f"{PROJECT_PREFIX}:{name}"
-        if len(data.encode()) <= CALLBACK_DATA_MAX_BYTES:
-            label = f"▶️ {name}" if name == active else name
-            rows.append([InlineKeyboardButton(label, callback_data=data)])
-    return InlineKeyboardMarkup(rows) if rows else None
+def project_token(project_id: str) -> str:
+    return hashlib.sha256(project_id.encode()).hexdigest()[:PROJECT_TOKEN_LENGTH]
 
 
-def projects_text(bridge: BridgeContext, active: str | None) -> str:
-    projects = bridge.projects.list_projects()
+def find_project(bridge: BridgeContext, token: str) -> str | None:
+    return next((p for p in bridge.projects.list_projects() if project_token(p) == token), None)
+
+
+def _page_count(projects: list[str]) -> int:
+    return max(1, -(-len(projects) // PAGE_SIZE))
+
+
+def _nav_row(page: int, pages: int) -> list[InlineKeyboardButton]:
+    row = []
+    if page > 0:
+        row.append(InlineKeyboardButton("⬅️", callback_data=f"{PAGE_PREFIX}:{page - 1}"))
+    if page < pages - 1:
+        row.append(InlineKeyboardButton("➡️", callback_data=f"{PAGE_PREFIX}:{page + 1}"))
+    return row
+
+
+def project_keyboard(
+    projects: list[str], active: str | None, page: int = 0
+) -> InlineKeyboardMarkup | None:
+    """One page of project buttons plus navigation arrows.
+
+    Telegram caps inline keyboards at about a hundred buttons, fewer than the
+    projects of a few real roots, hence the pagination.
+    """
     if not projects:
-        return f"Nessun progetto in {bridge.projects.root}. Crea una sotto-directory e riprova."
-    lines = [f"{'▶️' if name == active else '•'} {name}" for name in projects]
-    return "📁 Progetti disponibili:\n" + "\n".join(lines)
+        return None
+    pages = _page_count(projects)
+    page = min(max(page, 0), pages - 1)
+    rows = [
+        [
+            InlineKeyboardButton(
+                f"▶️ {name}" if name == active else name,
+                callback_data=f"{PROJECT_PREFIX}:{project_token(name)}",
+            )
+        ]
+        for name in projects[page * PAGE_SIZE : (page + 1) * PAGE_SIZE]
+    ]
+    nav = _nav_row(page, pages)
+    return InlineKeyboardMarkup([*rows, nav] if nav else rows)
+
+
+def projects_text(bridge: BridgeContext, active: str | None, page: int = 0) -> str:
+    projects = bridge.projects.list_projects()
+    roots = bridge.projects.sandbox.roots
+    if not projects:
+        names = ", ".join(str(root) for root in roots)
+        return f"Nessun progetto in {names}. Crea una sotto-directory e riprova."
+    pages = _page_count(projects)
+    page = min(max(page, 0), pages - 1)
+    return (
+        f"📁 {len(projects)} progetti in {len(roots)} radici, pagina {page + 1}/{pages}.\n"
+        f"Attivo: {active or 'nessuno'}. Tocca un progetto o usa /switch <radice>/<nome>."
+    )
 
 
 async def switch_project(bridge: BridgeContext, user_id: int, name: str) -> str:

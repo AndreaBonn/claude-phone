@@ -16,6 +16,7 @@ from src.permission_gate import (
     ApprovalRequest,
 )
 from src.permission_policy import GatePolicy
+from src.project_manager import Sandbox
 
 HOOK_SCRIPT = Path(__file__).resolve().parent.parent / "src" / "permission_hook.py"
 WAIT_TIMEOUT = 5.0
@@ -56,7 +57,7 @@ def make_broker(
     audit: list[tuple[Any, ...]] = []
     stopped: list[str] = []
     policy = GatePolicy(
-        root=root,
+        sandbox=Sandbox(roots=(root,)),
         allowed_tools=frozenset({"Read", "Bash", "Edit", "Write"}),
         auto_approve_tools=frozenset({"Read"}),
     )

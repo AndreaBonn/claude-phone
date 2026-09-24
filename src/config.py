@@ -30,7 +30,8 @@ class Settings(BaseSettings):
 
     telegram_bot_token: SecretStr
     allowed_users: Annotated[frozenset[int], NoDecode]
-    approved_directory: Path
+    # One or more sandbox roots, comma-separated; projects are their sub-directories.
+    approved_directory: Annotated[tuple[Path, ...], NoDecode]
     claude_allowed_tools: Annotated[tuple[str, ...], NoDecode] = DEFAULT_ALLOWED_TOOLS
     claude_auto_approve_tools: Annotated[tuple[str, ...], NoDecode] = DEFAULT_AUTO_APPROVE_TOOLS
     claude_timeout_seconds: int = Field(default=300, gt=0)
@@ -60,13 +61,21 @@ class Settings(BaseSettings):
     def _empty_key_is_none(cls, value: object) -> object:
         return None if value == "" else value
 
+    @field_validator("approved_directory", mode="before")
+    @classmethod
+    def _parse_roots(cls, value: object) -> object:
+        return _split_csv(value)
+
     @field_validator("approved_directory")
     @classmethod
-    def _resolve_sandbox(cls, value: Path) -> Path:
-        resolved = value.expanduser().resolve()
-        if not resolved.is_dir():
-            raise ValueError(f"APPROVED_DIRECTORY is not an existing directory: {resolved}")
-        return resolved
+    def _resolve_roots(cls, value: tuple[Path, ...]) -> tuple[Path, ...]:
+        roots = tuple(path.expanduser().resolve() for path in value)
+        if not roots:
+            raise ValueError("APPROVED_DIRECTORY must contain at least one directory")
+        for root in roots:
+            if not root.is_dir():
+                raise ValueError(f"APPROVED_DIRECTORY is not an existing directory: {root}")
+        return roots
 
     @field_validator("db_path", "gate_socket_path")
     @classmethod
@@ -75,15 +84,27 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def _check_consistency(self) -> "Settings":
-        # Claude must never be able to edit the gate that supervises it.
-        if PROJECT_ROOT.is_relative_to(self.approved_directory):
-            raise ValueError(
-                "APPROVED_DIRECTORY must not contain the bridge itself "
-                f"({PROJECT_ROOT}): Claude could rewrite its own permission gate"
-            )
+        _check_roots(self.approved_directory)
         if len(str(self.gate_socket_path).encode()) > MAX_UNIX_SOCKET_PATH:
             raise ValueError(f"GATE_SOCKET_PATH too long: {self.gate_socket_path}")
         return self
+
+
+def _check_roots(roots: tuple[Path, ...]) -> None:
+    """Roots must have distinct names (they prefix project ids) and must not overlap.
+
+    A root may contain the bridge, which is then excluded from the sandbox,
+    but a root inside the bridge would expose the permission gate itself.
+    """
+    names = [root.name for root in roots]
+    if len(set(names)) != len(names):
+        raise ValueError(f"APPROVED_DIRECTORY roots must not share the same name: {names}")
+    for root in roots:
+        if root.is_relative_to(PROJECT_ROOT):
+            raise ValueError(f"APPROVED_DIRECTORY root inside the bridge: {root}")
+        for other in roots:
+            if other != root and other.is_relative_to(root):
+                raise ValueError(f"APPROVED_DIRECTORY roots must not be nested: {other}")
 
 
 def format_config_error(error: ValidationError) -> str:

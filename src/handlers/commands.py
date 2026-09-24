@@ -41,7 +41,7 @@ async def switch(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     bridge = get_bridge(context)
     user_id, chat_id = _ids(update)
     if not context.args:
-        await send_text(context.bot, chat_id, "Uso: /switch <nome progetto>")
+        await send_text(context.bot, chat_id, "Uso: /switch <radice>/<progetto>, vedi /projects")
         return
     try:
         reply = await switch_project(bridge, user_id, " ".join(context.args))
@@ -81,7 +81,7 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     lines += [
         f"🔊 Verbosità: {verbose}",
         f"🔐 Approvazioni pendenti: {len(bridge.broker.pending())}",
-        f"📦 Sandbox: {bridge.settings.approved_directory}",
+        "📦 Sandbox: " + ", ".join(str(root) for root in bridge.settings.approved_directory),
     ]
     await send_text(context.bot, chat_id, "\n".join(lines))
 

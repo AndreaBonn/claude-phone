@@ -133,7 +133,8 @@ class ApprovalBroker:
         project = str(payload.get("project") or "?")
         tool = str(payload.get("tool_name") or "?")
         tool_input = payload.get("tool_input") or {}
-        cwd = Path(str(payload.get("cwd") or self._policy.root))
+        # A request without cwd resolves to "/", outside the sandbox: blocked.
+        cwd = Path(str(payload.get("cwd") or "/"))
         verdict = classify_tool_call(
             tool_name=tool, tool_input=tool_input, cwd=cwd, policy=self._policy
         )
