@@ -51,3 +51,11 @@ def test_audit_log_records_events(store: SessionStore) -> None:
     assert [row.event for row in rows] == ["prompt", "tool"]
     assert rows[1].outcome == "approve"
     assert rows[0].user_id == 42
+
+
+def test_database_file_is_private_even_if_it_existed(tmp_path: Path) -> None:
+    db_path = tmp_path / "b.db"
+    db_path.touch(mode=0o644)
+    db_path.chmod(0o644)
+    SessionStore(db_path)
+    assert db_path.stat().st_mode & 0o777 == 0o600

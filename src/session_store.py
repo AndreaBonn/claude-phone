@@ -40,6 +40,9 @@ CREATE TABLE IF NOT EXISTS pending_approvals (
 """
 
 
+PRIVATE_FILE_MODE = 0o600
+
+
 def _now() -> str:
     return datetime.now(UTC).isoformat(timespec="seconds")
 
@@ -73,6 +76,8 @@ class SessionStore:
     def __init__(self, db_path: Path) -> None:
         db_path.parent.mkdir(parents=True, exist_ok=True)
         self._conn = sqlite3.connect(db_path, isolation_level=None)
+        # The audit log holds prompt texts: readable by the owner only.
+        db_path.chmod(PRIVATE_FILE_MODE)
         self._conn.executescript(SCHEMA)
 
     def close(self) -> None:

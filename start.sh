@@ -3,6 +3,7 @@
 # Usage: ./start.sh              foreground, Ctrl+C to stop
 #        ./start.sh --background detached, stop with ./stop.sh
 set -euo pipefail
+umask 077
 cd "$(dirname "$(readlink -f "$0")")"
 
 PID_FILE="data/bot.pid"

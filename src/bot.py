@@ -1,5 +1,6 @@
 import fcntl
 import logging
+import os
 import shlex
 import sys
 from typing import Any, TextIO
@@ -37,6 +38,7 @@ from src.turn_runner import AUDIT_DETAIL_MAX, CHOICE_PREFIX
 logger = logging.getLogger(__name__)
 
 LOCK_PATH = PROJECT_ROOT / "data" / "bot.lock"
+PRIVATE_UMASK = 0o077
 ONLINE_MESSAGE = "🟢 Bot online: Claude Code è raggiungibile. /status per lo stato."
 OFFLINE_MESSAGE = "🔴 Bot disattivato."
 READY_BANNER = "Bot attivo, in ascolto"
@@ -191,6 +193,9 @@ def build_application(settings: Settings) -> AnyApplication:
 
 
 def main() -> int:
+    # Everything the bot creates (database, logs, socket, lock) is owner-only;
+    # it also closes the window between binding the gate socket and its chmod.
+    os.umask(PRIVATE_UMASK)
     try:
         settings = Settings()
     except ValidationError as exc:
