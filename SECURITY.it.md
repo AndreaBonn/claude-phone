@@ -46,6 +46,7 @@ Il bridge permette a un telefono di pilotare un processo Claude Code che può es
 
 - **Il controllo dei percorsi in Bash è best-effort**: il bridge cerca nei comandi di shell i token che sembrano percorsi (`/...`, `~`, `..`) e blocca quelli fuori sandbox (`src/permission_policy.py:64`). Un comando può comunque raggiungere file esterni in modi che una scansione dei token non vede. Per Bash la protezione reale è la tua approvazione: leggi il comando prima di approvarlo.
 - **Autorizzazioni "approva sempre"**: quando autorizzi un intero strumento non-Bash per la sessione, le chiamate successive a quello strumento non ti vengono più mostrate fino a `/new`, a un cambio di profilo o a un riavvio. La sandbox resta attiva.
+- **Gli allegati partono senza approvazione**: una riga `[[file: percorso]]` nella risposta di Claude, o un deliverable scritto da un `Write` approvato, viene caricato nella chat senza chiedere. Può partire qualunque file dentro le root della sandbox, compresi i `.env` di altri progetti, e da quel momento resta sui server di Telegram come ogni messaggio della chat (`src/file_delivery.py:70`). La cartella del bridge e i percorsi fuori dalle root non vengono mai inviati.
 - **La tua configurazione di Claude Code viene caricata**: rule, hook, skill, plugin e server MCP del profilo scelto girano dentro le sessioni del bridge. Un hook delle tue impostazioni utente viene eseguito come in una sessione da terminale.
 
 ## Best practice per gli utenti
