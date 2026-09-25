@@ -128,10 +128,10 @@ Un profilo è una cartella dentro `CLAUDE_PROFILES_DIR` con il suo login. Il bot
 
 ### systemd (facoltativo, solo avvio manuale)
 
-`systemd/telegram-claude-bridge.service` è una unit utente senza sezione `[Install]`: `systemctl --user enable` la rifiuta, quindi non può partire al login. Sostituisci `/path/to/telegram-claude-bridge` con il percorso del repository, controlla che il `PATH` contenga `uv` e `claude`, poi:
+`systemd/telegram-claude-bridge.service` è una unit utente senza sezione `[Install]`: `systemctl --user enable` la rifiuta, quindi non può partire al login. Il file è un modello: `systemd/install-unit.sh` inserisce il percorso del repository e le directory di `uv` e `claude`, e installa il risultato in `~/.config/systemd/user` (con `--print` lo mostra senza installarlo). Se sposti il repository, rilancialo.
 
 ```bash
-systemctl --user link "$PWD/systemd/telegram-claude-bridge.service"
+systemd/install-unit.sh
 systemctl --user start telegram-claude-bridge
 systemctl --user stop telegram-claude-bridge
 ```
