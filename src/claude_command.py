@@ -9,7 +9,7 @@ from src.config import PROJECT_ROOT
 from src.permission_hook import PROJECT_ENV, SOCKET_ENV, TIMEOUT_ENV
 
 HOOK_SCRIPT = PROJECT_ROOT / "src" / "permission_hook.py"
-SYSTEM_PROMPT_PATH = PROJECT_ROOT / "prompts" / "telegram-bridge-system-v2.md"
+SYSTEM_PROMPT_PATH = PROJECT_ROOT / "prompts" / "telegram-bridge-system-v3.md"
 # The hook must outlive the approval wait, and Claude must outlive the hook.
 HOOK_TIMEOUT_MARGIN = 30
 SECRET_ENV_VARS = ("TELEGRAM_BOT_TOKEN", "ANTHROPIC_API_KEY")
