@@ -277,8 +277,8 @@ class ClaudeSession:
         process = self._process
         if process is None or process.returncode is not None:
             return
-        if process.stdin is not None:
-            process.stdin.close()
+        assert process.stdin is not None  # always a pipe, see _ensure_started
+        process.stdin.close()
         with contextlib.suppress(TimeoutError):
             await asyncio.wait_for(process.wait(), STOP_GRACE_SECONDS)
             return

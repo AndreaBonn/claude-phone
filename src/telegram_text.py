@@ -48,8 +48,7 @@ class _ChunkBuilder:
             self.fence_lang = None if self.fence_lang is not None else match.group(1)
 
     def finish(self) -> list[str]:
-        if self.lines:
-            self.chunks.append("\n".join(self.lines))
+        self.chunks.append("\n".join(self.lines))
         return [chunk for chunk in self.chunks if chunk.strip()]
 
 
