@@ -1,11 +1,19 @@
 [project]
 name = "telegram-claude-bridge"
 version = "0.1.0"
+description = "Telegram bot that drives a local Claude Code process and gates every tool call with approval buttons"
+readme = "README.md"
+license = "Apache-2.0"
+license-files = ["LICENSE", "NOTICE"]
+authors = [{ name = "Andrea Bonacci" }]
 requires-python = ">=3.11"
 dependencies = [
     "pydantic-settings>=2.4",
     "python-telegram-bot>=21",
 ]
+
+[project.urls]
+Repository = "https://github.com/AndreaBonn/claude-phone"
 
 [dependency-groups]
 dev = [
