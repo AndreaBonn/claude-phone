@@ -4,7 +4,7 @@
 
 ## Versioni supportate
 
-Il progetto è in sviluppo attivo e non ha release con tag. Gli aggiornamenti di sicurezza vengono applicati all'ultimo commit su `main`.
+Il progetto è in sviluppo attivo. Gli aggiornamenti di sicurezza vengono applicati all'ultimo commit su `main`; le release con tag (da `v0.1.0`) non ricevono fix retroattivi.
 
 ## Segnalare una vulnerabilità
 

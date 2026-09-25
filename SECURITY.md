@@ -4,7 +4,7 @@
 
 ## Supported Versions
 
-This project is in active development and has no tagged releases. Security updates are applied to the latest commit on `main`.
+This project is in active development. Security updates are applied to the latest commit on `main`; tagged releases (from `v0.1.0`) do not receive backported fixes.
 
 ## Reporting a Vulnerability
 
