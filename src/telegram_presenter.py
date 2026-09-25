@@ -5,7 +5,7 @@ from typing import Any
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.constants import ParseMode
 
-from src.message_formatter import format_approval_request
+from src.message_formatter import approval_overflow, format_approval_request
 from src.permission_gate import ApprovalDecision, ApprovalRequest
 from src.session_store import SessionStore
 from src.telegram_io import edit_text, send_text, with_retry
@@ -27,6 +27,8 @@ BUTTON_LABELS = {
 ALWAYS_BASH_LABEL = "🔁 Sempre questo comando"
 ALWAYS_TOOL_LABEL = "🔁 Sempre {tool} in questa sessione"
 RESTART_NOTE = "⚠️ Richiesta annullata: il bot è stato riavviato."
+TRUNCATED_NOTE = "⚠️ Contenuto troncato ({length} caratteri): quello completo è nell'allegato"
+FULL_BODY_FILENAME = "approvazione-{approval_id}.txt"
 
 
 def _always_label(tool_name: str) -> str:
@@ -36,18 +38,18 @@ def _always_label(tool_name: str) -> str:
     return ALWAYS_TOOL_LABEL.format(tool=tool_name)
 
 
-def approval_keyboard(approval_id: str, tool_name: str) -> InlineKeyboardMarkup:
+def approval_keyboard(
+    approval_id: str, tool_name: str, allow_always: bool = True
+) -> InlineKeyboardMarkup:
     def button(decision: ApprovalDecision, label: str | None = None) -> InlineKeyboardButton:
         data = f"{APPROVAL_PREFIX}:{approval_id}:{decision.value}"
         return InlineKeyboardButton(label or BUTTON_LABELS[decision], callback_data=data)
 
-    return InlineKeyboardMarkup(
-        [
-            [button(ApprovalDecision.APPROVE), button(ApprovalDecision.DENY)],
-            [button(ApprovalDecision.APPROVE_ALWAYS, _always_label(tool_name))],
-            [button(ApprovalDecision.DENY_AND_STOP)],
-        ]
-    )
+    rows = [[button(ApprovalDecision.APPROVE), button(ApprovalDecision.DENY)]]
+    if allow_always:
+        rows.append([button(ApprovalDecision.APPROVE_ALWAYS, _always_label(tool_name))])
+    rows.append([button(ApprovalDecision.DENY_AND_STOP)])
+    return InlineKeyboardMarkup(rows)
 
 
 class TelegramApprovalPresenter:
@@ -66,17 +68,32 @@ class TelegramApprovalPresenter:
         text = format_approval_request(request.project, request.tool_name, request.tool_input)
         if request.warning:
             text += f"\n{html.escape(request.warning)}"
+        # A cut body goes out in full first, and "always" is withheld: nobody
+        # grants for good what they could not read. A failed upload raises,
+        # and the broker denies the call.
+        full_body = approval_overflow(request.tool_name, request.tool_input)
+        if full_body is not None:
+            await self._send_full_body(chat_id, request.approval_id, full_body)
+            text += f"\n{html.escape(TRUNCATED_NOTE.format(length=len(full_body)))}"
+        keyboard = approval_keyboard(
+            request.approval_id, request.tool_name, allow_always=full_body is None
+        )
         message = await with_retry(
             lambda: self._bot.send_message(
-                chat_id=chat_id,
-                text=text,
-                parse_mode=ParseMode.HTML,
-                reply_markup=approval_keyboard(request.approval_id, request.tool_name),
+                chat_id=chat_id, text=text, parse_mode=ParseMode.HTML, reply_markup=keyboard
             )
         )
         self._prompts[request.approval_id] = (chat_id, message.message_id, text)
         self._store.add_pending_approval(
             request.approval_id, request.project, chat_id, message.message_id
+        )
+
+    async def _send_full_body(self, chat_id: int, approval_id: str, body: str) -> None:
+        filename = FULL_BODY_FILENAME.format(approval_id=approval_id)
+        await with_retry(
+            lambda: self._bot.send_document(
+                chat_id=chat_id, document=body.encode(), filename=filename
+            )
         )
 
     async def close(self, request: ApprovalRequest, decision: ApprovalDecision, note: str) -> None:

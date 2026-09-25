@@ -59,6 +59,9 @@ class FakeBot:
         return message
 
     async def send_document(self, chat_id: int, document: Any, filename: str | None = None) -> None:
+        if isinstance(document, bytes):
+            self.documents.append((chat_id, document, filename or ""))
+            return
         path = Path(document)
         self.documents.append((chat_id, path.read_bytes(), filename or path.name))
 

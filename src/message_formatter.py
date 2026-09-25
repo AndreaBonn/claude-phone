@@ -95,12 +95,14 @@ def extract_files(text: str) -> tuple[str, list[str]]:
     return _FILE.sub("", text).strip(), paths
 
 
-def _approval_body(tool_name: str, tool_input: dict[str, Any]) -> str:
+def _approval_body(tool_name: str, tool_input: dict[str, Any], edit_side_max: int | None) -> str:
     if tool_name == "Bash":
         return str(tool_input.get("command", ""))
     if tool_name == "Edit":
-        old = truncate(str(tool_input.get("old_string", "")), APPROVAL_SNIPPET_MAX // 2)
-        new = truncate(str(tool_input.get("new_string", "")), APPROVAL_SNIPPET_MAX // 2)
+        old = str(tool_input.get("old_string", ""))
+        new = str(tool_input.get("new_string", ""))
+        if edit_side_max is not None:
+            old, new = truncate(old, edit_side_max), truncate(new, edit_side_max)
         minus = "\n".join(f"- {line}" for line in old.splitlines())
         plus = "\n".join(f"+ {line}" for line in new.splitlines())
         return f"{minus}\n{plus}"
@@ -109,13 +111,28 @@ def _approval_body(tool_name: str, tool_input: dict[str, Any]) -> str:
     return json.dumps(tool_input, ensure_ascii=False, indent=1)
 
 
+def _shown_approval_body(tool_name: str, tool_input: dict[str, Any]) -> str:
+    body = _approval_body(tool_name, tool_input, edit_side_max=APPROVAL_SNIPPET_MAX // 2)
+    return truncate(body, APPROVAL_SNIPPET_MAX)
+
+
+def approval_overflow(tool_name: str, tool_input: dict[str, Any]) -> str | None:
+    """Full approval body when the prompt shows only part of it, else None.
+
+    The user approves what the call does, not what fits on the screen: a cut
+    body must reach them in full some other way.
+    """
+    full = _approval_body(tool_name, tool_input, edit_side_max=None)
+    return None if full == _shown_approval_body(tool_name, tool_input) else full
+
+
 def format_approval_request(project: str, tool_name: str, tool_input: dict[str, Any]) -> str:
     """HTML text of the approval prompt shown with the inline buttons."""
     lines = [f"🔐 <b>Approvazione richiesta</b> · {html.escape(project)}", f"<b>{tool_name}</b>"]
     path = tool_input.get("file_path")
     if path:
         lines.append(f"<code>{html.escape(str(path))}</code>")
-    body = truncate(_approval_body(tool_name, tool_input), APPROVAL_SNIPPET_MAX)
+    body = _shown_approval_body(tool_name, tool_input)
     if body.strip():
         lines.append(f"<pre>{html.escape(body)}</pre>")
     return "\n".join(lines)
