@@ -191,6 +191,13 @@ def register_handlers(app: AnyApplication, allowed_users: frozenset[int]) -> Non
             filters.TEXT & ~filters.COMMAND & filters.ChatType.PRIVATE, messages.handle_text
         )
     )
+    # A captioned file has no `text`, so it never matches the text handler above.
+    app.add_handler(
+        MessageHandler(
+            (filters.Document.ALL | filters.PHOTO) & filters.ChatType.PRIVATE,
+            messages.handle_attachment,
+        )
+    )
     app.add_handler(CallbackQueryHandler(callbacks.handle_approval, pattern=f"^{APPROVAL_PREFIX}:"))
     app.add_handler(CallbackQueryHandler(callbacks.handle_choice, pattern=f"^{CHOICE_PREFIX}:"))
     app.add_handler(CallbackQueryHandler(callbacks.handle_stop, pattern=f"^{STOP_PREFIX}:"))

@@ -39,6 +39,10 @@ class FakeBot:
         self.blocked_chats: set[int] = set()
         # (chat_id, file content, filename) of every document sent.
         self.documents: list[tuple[int, bytes, str]] = []
+        # Incoming files by file_id: bytes to download, or the error the download
+        # raises; a BadRequest is raised by get_file itself, as Telegram does.
+        self.files: dict[str, bytes | Exception] = {}
+        self.file_requests: list[str] = []
 
     async def set_my_commands(self, commands: list[Any]) -> bool:
         self.commands = list(commands)
@@ -65,6 +69,13 @@ class FakeBot:
         path = Path(document)
         self.documents.append((chat_id, path.read_bytes(), filename or path.name))
 
+    async def get_file(self, file_id: str) -> "FakeFile":
+        self.file_requests.append(file_id)
+        content = self.files[file_id]
+        if isinstance(content, BadRequest):
+            raise content
+        return FakeFile(content)
+
     async def edit_message_text(
         self,
         chat_id: int,
@@ -88,6 +99,16 @@ class FakeBot:
 
     def visible(self) -> list[SentMessage]:
         return [m for m in self.messages if not m.deleted]
+
+
+class FakeFile:
+    def __init__(self, content: bytes | Exception) -> None:
+        self.content = content
+
+    async def download_as_bytearray(self) -> bytearray:
+        if isinstance(self.content, Exception):
+            raise self.content
+        return bytearray(self.content)
 
 
 async def wait_until(condition: Callable[[], bool], description: str, timeout: float = 5.0) -> None:
