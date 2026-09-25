@@ -13,6 +13,10 @@ All notable changes to this project are documented here. The format follows [Kee
 
 - SECURITY documents that attachments reach the chat without approval.
 
+### Fixed
+
+- An approval prompt that cannot show the whole command or content now sends it in full as a `.txt` attachment and hides the "approve always" button.
+
 ## [0.1.0] - 2026-09-25
 
 First version.
