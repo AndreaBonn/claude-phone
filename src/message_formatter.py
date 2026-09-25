@@ -38,6 +38,7 @@ TEXT_PREVIEW_MAX = 300
 TEXT_FULL_MAX = 1500
 CONTEXT_LINE_MAX = 120
 _CHOICE = re.compile(r"^[ \t]*\[\[option:[ \t]*(.+?)[ \t]*\]\][ \t]*$", re.MULTILINE)
+_FILE = re.compile(r"^[ \t]*\[\[file:[ \t]*(.+?)[ \t]*\]\][ \t]*$", re.MULTILINE)
 
 
 def truncate(text: str, limit: int) -> str:
@@ -80,6 +81,18 @@ def extract_choices(text: str) -> tuple[str, list[str]]:
     if not labels:
         return text, []
     return _CHOICE.sub("", text).strip(), labels[:MAX_CHOICES]
+
+
+def extract_files(text: str) -> tuple[str, list[str]]:
+    """Pull `[[file: path]]` lines out of Claude's answer.
+
+    Same convention as the choices: the bridge system prompt teaches Claude to
+    name the files it wants the user to receive as attachments.
+    """
+    paths = _FILE.findall(text)
+    if not paths:
+        return text, []
+    return _FILE.sub("", text).strip(), paths
 
 
 def _approval_body(tool_name: str, tool_input: dict[str, Any]) -> str:

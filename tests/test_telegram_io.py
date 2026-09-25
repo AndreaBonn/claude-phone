@@ -130,3 +130,15 @@ async def test_progress_failures_never_abort_the_turn() -> None:
     await progress.finish("✅")
     await progress.delete()
     assert progress.lines == ["line"]
+
+
+async def test_progress_keeps_its_button_until_finished(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(telegram_io, "PROGRESS_EDIT_INTERVAL", 0)
+    bot = FakeBot()
+    markup = InlineKeyboardMarkup([[InlineKeyboardButton("⏹️ Stop", callback_data="sp:x")]])
+    progress = await ProgressMessage.create(bot, chat_id=1, header="⏳", reply_markup=markup)
+    assert bot.messages[0].reply_markup is markup
+    await progress.add_line("📖 Read: a.py")
+    assert bot.messages[0].reply_markup is markup
+    await progress.finish("✅ done")
+    assert bot.messages[0].reply_markup is None

@@ -10,7 +10,7 @@ from src.bridge_context import BRIDGE_KEY, BridgeContext
 from src.handlers import commands, messages
 from src.handlers.messages import NO_PROJECT
 from tests.conftest import ALPHA, BETA, USER
-from tests.fakes import FakeBot, wait_until
+from tests.fakes import FakeBot, grant_always, wait_until
 
 NEW_USER = 7
 
@@ -184,3 +184,37 @@ async def test_projects_without_any_project_says_so(bridge: BridgeContext, bot: 
 async def test_unknown_command_points_to_new_session(bridge: BridgeContext, bot: FakeBot) -> None:
     await commands.unknown_command(*command(bridge, bot))
     assert last_text(bot) == "Comando sconosciuto, per una nuova sessione usa /new o /clear."
+
+
+async def test_status_lists_the_session_grants(bridge: BridgeContext, bot: FakeBot) -> None:
+    cwd = str(bridge.settings.approved_directory[0] / "alpha")
+    await grant_always(bridge.broker, ALPHA, cwd, "Bash", {"command": "npm test"})
+    await commands.status(*command(bridge, bot))
+    assert "🔁 Approvati per la sessione: Bash: npm test" in last_text(bot)
+
+
+async def test_status_without_grants_says_none(bridge: BridgeContext, bot: FakeBot) -> None:
+    await commands.status(*command(bridge, bot))
+    assert "🔁 Approvati per la sessione: nessuno" in last_text(bot)
+
+
+async def test_new_session_revokes_the_grants(bridge: BridgeContext, bot: FakeBot) -> None:
+    cwd = str(bridge.settings.approved_directory[0] / "alpha")
+    await grant_always(bridge.broker, ALPHA, cwd, "Edit", {"file_path": "a"})
+    await commands.new_session(*command(bridge, bot))
+    assert bridge.broker.grants(ALPHA) == []
+
+
+async def test_stop_command_interrupts_the_active_project(
+    busy_bridge: BridgeContext, bot: FakeBot
+) -> None:
+    await commands.stop(*command(busy_bridge, bot))
+    assert last_text(bot).startswith("⏹️")
+    await wait_until(lambda: not busy_bridge.sessions.is_busy(ALPHA), "turn ended")
+
+
+async def test_stop_command_without_project_asks_for_one(
+    bridge: BridgeContext, bot: FakeBot
+) -> None:
+    await commands.stop(*command(bridge, bot, user=NEW_USER))
+    assert last_text(bot) == "Nessun progetto attivo: usa /projects."

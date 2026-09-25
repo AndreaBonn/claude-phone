@@ -4,7 +4,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-from src.claude_session import ClaudeSession, EventCallback, SessionConfig, SessionNotFoundError
+from src.claude_command import SessionConfig
+from src.claude_session import ClaudeSession, EventCallback, SessionNotFoundError
 from src.profiles import DEFAULT_PROFILE
 from src.project_manager import ProjectManager
 from src.session_store import SessionStore
@@ -82,6 +83,11 @@ class SessionManager:
         session = self._sessions.get(project)
         if session is not None:
             session.stop_requested = True
+
+    async def interrupt(self, project: str) -> bool:
+        """Kill the project's running turn; False if nothing was running."""
+        session = self._sessions.get(project)
+        return session is not None and await session.interrupt()
 
     async def run_turn(self, project: str, text: str, on_event: EventCallback) -> TurnOutcome:
         try:

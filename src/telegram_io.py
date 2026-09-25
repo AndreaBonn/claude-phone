@@ -91,8 +91,18 @@ async def send_text(
     ]
 
 
-async def edit_text(bot: Any, chat_id: int, message_id: int, text: str, html: bool) -> None:
-    """Edit a message, ignoring the harmless 'message is not modified' error."""
+async def edit_text(
+    bot: Any,
+    chat_id: int,
+    message_id: int,
+    text: str,
+    html: bool,
+    reply_markup: InlineKeyboardMarkup | None = None,
+) -> None:
+    """Edit a message, ignoring the harmless 'message is not modified' error.
+
+    Telegram drops the inline keyboard of an edited message unless it is sent again.
+    """
     try:
         await with_retry(
             lambda: bot.edit_message_text(
@@ -100,6 +110,7 @@ async def edit_text(bot: Any, chat_id: int, message_id: int, text: str, html: bo
                 message_id=message_id,
                 text=text,
                 parse_mode=ParseMode.HTML if html else None,
+                reply_markup=reply_markup,
             )
         )
     except BadRequest as exc:
@@ -114,19 +125,36 @@ class ProgressMessage:
     under Telegram's edit rate limit; a pending update is flushed later.
     """
 
-    def __init__(self, bot: Any, chat_id: int, message_id: int, header: str) -> None:
+    def __init__(
+        self,
+        bot: Any,
+        chat_id: int,
+        message_id: int,
+        header: str,
+        reply_markup: InlineKeyboardMarkup | None = None,
+    ) -> None:
         self._bot = bot
         self.chat_id = chat_id
         self.message_id = message_id
         self.header = header
+        # Kept on every edit while the turn runs, removed by finish().
+        self.reply_markup = reply_markup
         self.lines: list[str] = []
         self._last_edit = 0.0
         self._flush_task: asyncio.Task[None] | None = None
 
     @classmethod
-    async def create(cls, bot: Any, chat_id: int, header: str) -> "ProgressMessage":
-        message = await with_retry(lambda: bot.send_message(chat_id=chat_id, text=header))
-        return cls(bot, chat_id, message.message_id, header)
+    async def create(
+        cls,
+        bot: Any,
+        chat_id: int,
+        header: str,
+        reply_markup: InlineKeyboardMarkup | None = None,
+    ) -> "ProgressMessage":
+        message = await with_retry(
+            lambda: bot.send_message(chat_id=chat_id, text=header, reply_markup=reply_markup)
+        )
+        return cls(bot, chat_id, message.message_id, header, reply_markup)
 
     def render(self) -> str:
         return render_progress(self.header, self.lines, limit=TELEGRAM_MAX_LENGTH)
@@ -146,7 +174,14 @@ class ProgressMessage:
     async def _edit(self) -> None:
         self._last_edit = time.monotonic()
         try:
-            await edit_text(self._bot, self.chat_id, self.message_id, self.render(), html=False)
+            await edit_text(
+                self._bot,
+                self.chat_id,
+                self.message_id,
+                self.render(),
+                html=False,
+                reply_markup=self.reply_markup,
+            )
         except Exception:
             # Progress is best effort: a failed edit must not abort Claude's turn.
             logger.exception("Could not update progress message")
@@ -159,6 +194,7 @@ class ProgressMessage:
     async def finish(self, header: str) -> None:
         self._cancel_flush()
         self.header = header
+        self.reply_markup = None
         await self._edit()
 
     async def delete(self) -> None:

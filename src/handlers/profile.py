@@ -42,6 +42,8 @@ async def select_profile(bridge: BridgeContext, user_id: int, name: str) -> str:
         return f"🚫 {exc}"
     if not await bridge.sessions.set_profile(name, config_dir):
         return BUSY_REPLY
+    # Grants belong to the sessions just closed, which are per profile.
+    bridge.broker.revoke_grants(None)
     bridge.store.set_profile(user_id, name)
     return (
         f"👤 Profilo Claude attivo: {name}\nOgni progetto riprende la sessione di questo profilo."

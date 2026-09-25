@@ -14,6 +14,7 @@ from src.permission_gate import (
     ApprovalBroker,
     ApprovalDecision,
     ApprovalRequest,
+    grant_key,
 )
 from src.permission_policy import GatePolicy
 from src.project_manager import Sandbox
@@ -298,3 +299,62 @@ async def test_cancel_does_not_override_an_answer_already_given(root: Path) -> N
     await broker.cancel(project="alpha")
     assert (await asyncio.wait_for(task, WAIT_TIMEOUT))["decision"] == "allow"
     assert presenter.closed == []
+
+
+# --- session grants: "approve always" ---
+
+
+async def test_approve_always_skips_the_prompt_for_the_same_tool(root: Path) -> None:
+    presenter = FakePresenter(answer=ApprovalDecision.APPROVE_ALWAYS)
+    broker, audit, _ = make_broker(root, presenter)
+    first = await broker.handle_request(request(root, "Edit", {"file_path": "a.py"}))
+    presenter.answer = None
+    second = await broker.handle_request(request(root, "Edit", {"file_path": "b.py"}))
+    assert first["decision"] == "allow" and second["decision"] == "allow"
+    assert len(presenter.shown) == 1
+    assert [row[3] for row in audit] == ["always", "session-approved"]
+    assert broker.grants("alpha") == ["Edit"]
+
+
+async def test_bash_grant_covers_only_the_exact_command(root: Path) -> None:
+    presenter = FakePresenter(answer=ApprovalDecision.APPROVE_ALWAYS)
+    broker, _, _ = make_broker(root, presenter)
+    await broker.handle_request(request(root, "Bash", {"command": "npm test"}))
+    presenter.answer = ApprovalDecision.DENY
+    same = await broker.handle_request(request(root, "Bash", {"command": "npm test"}))
+    other = await broker.handle_request(request(root, "Bash", {"command": "npm test; rm -r x"}))
+    assert same["decision"] == "allow"
+    assert other["decision"] == "deny"
+    assert len(presenter.shown) == 2
+
+
+async def test_grant_never_overrides_the_sandbox(root: Path) -> None:
+    presenter = FakePresenter(answer=ApprovalDecision.APPROVE_ALWAYS)
+    broker, _, _ = make_broker(root, presenter)
+    await broker.handle_request(request(root, "Edit", {"file_path": "a.py"}))
+    response = await broker.handle_request(request(root, "Edit", {"file_path": "/etc/passwd"}))
+    assert response["decision"] == "deny"
+
+
+async def test_grants_are_per_project_and_revocable(root: Path) -> None:
+    presenter = FakePresenter(answer=ApprovalDecision.APPROVE_ALWAYS)
+    broker, _, _ = make_broker(root, presenter)
+    await broker.handle_request(request(root, "Edit", {"file_path": "a.py"}))
+    assert broker.grants("beta") == []
+    broker.revoke_grants("alpha")
+    presenter.answer = ApprovalDecision.DENY
+    response = await broker.handle_request(request(root, "Edit", {"file_path": "a.py"}))
+    assert response["decision"] == "deny"
+    assert broker.grants("alpha") == []
+
+
+async def test_revoking_every_project_clears_all_grants(root: Path) -> None:
+    broker, _, _ = make_broker(root, FakePresenter(answer=ApprovalDecision.APPROVE_ALWAYS))
+    await broker.handle_request(request(root, "Write", {"file_path": "a.py"}))
+    broker.revoke_grants(None)
+    assert broker.grants("alpha") == []
+
+
+def test_grant_label_names_the_bash_command_or_the_tool() -> None:
+    assert grant_key("Bash", {"command": "npm test"}) == "Bash: npm test"
+    assert grant_key("mcp__x__y", {"a": 1}) == "mcp__x__y"

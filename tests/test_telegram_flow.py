@@ -7,11 +7,11 @@ from telegram import Update
 
 from src.bridge_context import BRIDGE_KEY, BridgeContext
 from src.handlers import callbacks
-from src.handlers.projects import switch_project
+from src.handlers.projects import project_token, switch_project
 from src.project_manager import SandboxError
 from src.session_store import PendingApproval
 from src.telegram_presenter import RESTART_NOTE
-from src.turn_runner import TurnRequest, run_user_turn
+from src.turn_runner import NOTHING_TO_STOP, TurnRequest, run_user_turn
 from tests.conftest import ALPHA, BETA, USER
 from tests.fakes import FakeBot, wait_until
 
@@ -146,7 +146,7 @@ def test_every_advertised_command_and_button_has_a_handler(bridge: BridgeContext
     patterns = {
         getattr(h.pattern, "pattern", None) for h in handlers if isinstance(h, CallbackQueryHandler)
     }
-    assert patterns == {"^ap:", "^ch:", "^pj:", "^pg:", "^pf:"}
+    assert patterns == {"^ap:", "^ch:", "^pj:", "^pg:", "^pf:", "^sp:"}
 
 
 class BrokenBot(FakeBot):
@@ -387,3 +387,49 @@ def test_plain_text_still_goes_to_claude(bridge: BridgeContext) -> None:
     from src.handlers import messages
 
     assert first_handler_for(bridge, "ciao").callback is messages.handle_text
+
+
+async def test_approve_always_button_grants_the_tool_for_the_session(
+    bridge: BridgeContext, bot: FakeBot
+) -> None:
+    cwd = str(bridge.settings.approved_directory[0] / "alpha")
+    payload = {"project": ALPHA, "tool_name": "Edit", "tool_input": {"file_path": "a"}, "cwd": cwd}
+    gate = asyncio.create_task(bridge.broker.handle_request(payload))
+    await wait_until(lambda: bool(bot.messages), "approval prompt sent")
+    prompt = bot.messages[-1]
+    buttons = [b for row in prompt.reply_markup.inline_keyboard for b in row]
+    always = next(b for b in buttons if b.callback_data.endswith(":always"))
+    assert always.text == "🔁 Sempre Edit in questa sessione"
+    update, context, query = callback(bridge, bot, always.callback_data)
+    await callbacks.handle_approval(update, context)
+    assert (await asyncio.wait_for(gate, 5))["decision"] == "allow"
+    assert query.answers == ["🔁 Approvato per la sessione"]
+    assert prompt.text.endswith("<b>🔁 Approvato per la sessione</b>")
+    again = await bridge.broker.handle_request(payload)
+    assert again["decision"] == "allow"
+    assert len(bot.messages) == 1
+
+
+async def test_bash_always_button_names_the_command(bridge: BridgeContext, bot: FakeBot) -> None:
+    cwd = str(bridge.settings.approved_directory[0] / "alpha")
+    payload = {"project": ALPHA, "tool_name": "Bash", "tool_input": {"command": "ls"}, "cwd": cwd}
+    gate = asyncio.create_task(bridge.broker.handle_request(payload))
+    await wait_until(lambda: bool(bot.messages), "approval prompt sent")
+    labels = [b.text for row in bot.messages[-1].reply_markup.inline_keyboard for b in row]
+    assert "🔁 Sempre questo comando" in labels
+    await bridge.broker.cancel(ALPHA)
+    await asyncio.wait_for(gate, 5)
+
+
+async def test_stop_button_with_unknown_project_is_rejected(
+    bridge: BridgeContext, bot: FakeBot
+) -> None:
+    update, context, query = callback(bridge, bot, "sp:0000000000000000")
+    await callbacks.handle_stop(update, context)
+    assert query.answers == [callbacks.INVALID_BUTTON]
+
+
+async def test_stop_button_answers_with_the_outcome(bridge: BridgeContext, bot: FakeBot) -> None:
+    update, context, query = callback(bridge, bot, f"sp:{project_token(ALPHA)}")
+    await callbacks.handle_stop(update, context)
+    assert query.answers == [NOTHING_TO_STOP.format(project=ALPHA)]

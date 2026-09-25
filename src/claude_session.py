@@ -1,34 +1,22 @@
 import asyncio
 import collections
 import contextlib
-import json
 import logging
 import os
-import sys
-from collections.abc import Awaitable, Callable, Mapping
-from dataclasses import dataclass
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 
-from src.config import PROJECT_ROOT
-from src.permission_hook import PROJECT_ENV, SOCKET_ENV, TIMEOUT_ENV
+from src.claude_command import SessionConfig, build_command, build_env, user_message
 from src.stream_parser import InitEvent, ResultEvent, StreamEvent, parse_line
 
 logger = logging.getLogger(__name__)
 
-HOOK_SCRIPT = PROJECT_ROOT / "src" / "permission_hook.py"
-SYSTEM_PROMPT_PATH = PROJECT_ROOT / "prompts" / "telegram-bridge-system-v1.md"
 STREAM_LIMIT = 16 * 1024 * 1024
 STDERR_TAIL_LINES = 20
 STDERR_CHUNK = 65536
 STDERR_LINE_MAX = 2000
 STOP_GRACE_SECONDS = 5.0
-# The hook must outlive the approval wait, and Claude must outlive the hook.
-HOOK_TIMEOUT_MARGIN = 30
-SECRET_ENV_VARS = ("TELEGRAM_BOT_TOKEN", "ANTHROPIC_API_KEY")
 SESSION_NOT_FOUND_MARKER = "No conversation found"
-CONFIG_DIR_ENV = "CLAUDE_CONFIG_DIR"
-VIRTUAL_ENV_VAR = "VIRTUAL_ENV"
-BRIDGE_VENV = PROJECT_ROOT / ".venv"
 
 EventCallback = Callable[[StreamEvent], Awaitable[None]]
 
@@ -45,97 +33,12 @@ class ClaudeTimeoutError(ClaudeSessionError):
     """No output from claude for longer than the idle timeout."""
 
 
+class TurnInterruptedError(ClaudeSessionError):
+    """The user stopped the turn; the process was killed on purpose."""
+
+
 class SessionNotFoundError(ClaudeSessionError):
     """`--resume` pointed at a session claude no longer has."""
-
-
-@dataclass(frozen=True)
-class SessionConfig:
-    claude_command: tuple[str, ...]
-    allowed_tools: tuple[str, ...]
-    gate_socket: Path
-    approval_timeout: int
-    idle_timeout: float
-    system_prompt: str
-    api_key: str | None = None
-    # Claude profile directory (CLAUDE_CONFIG_DIR); None means the default ~/.claude.
-    config_dir: Path | None = None
-
-
-def build_hook_settings(config: SessionConfig) -> str:
-    command = f'"{sys.executable}" "{HOOK_SCRIPT}"'
-    hook = {
-        "type": "command",
-        "command": command,
-        "timeout": config.approval_timeout + 2 * HOOK_TIMEOUT_MARGIN,
-    }
-    return json.dumps({"hooks": {"PreToolUse": [{"matcher": "*", "hooks": [hook]}]}})
-
-
-def build_command(config: SessionConfig, session_id: str | None) -> list[str]:
-    command = [
-        *config.claude_command,
-        "-p",
-        "--output-format",
-        "stream-json",
-        "--input-format",
-        "stream-json",
-        "--verbose",
-        "--allowedTools",
-        ",".join(config.allowed_tools),
-        "--permission-mode",
-        "default",
-        "--settings",
-        build_hook_settings(config),
-        "--append-system-prompt",
-        config.system_prompt,
-    ]
-    if session_id:
-        command += ["--resume", session_id]
-    return command
-
-
-def _without_bridge_venv(env: dict[str, str]) -> dict[str, str]:
-    """Undo what `uv run` did to the bot's environment.
-
-    `uv run` puts the bridge's .venv first in PATH and sets VIRTUAL_ENV; inherited
-    by claude, every `python3` in hooks and Bash became the bridge interpreter
-    (the user's verify.sh failed on a missing pyyaml). A foreign venv is kept.
-    """
-    if env.get(VIRTUAL_ENV_VAR) != str(BRIDGE_VENV):
-        return env
-    venv_bin = str(BRIDGE_VENV / "bin")
-    cleaned = {key: value for key, value in env.items() if key != VIRTUAL_ENV_VAR}
-    entries = env.get("PATH", "").split(os.pathsep)
-    cleaned["PATH"] = os.pathsep.join(entry for entry in entries if entry != venv_bin)
-    return cleaned
-
-
-def build_env(config: SessionConfig, project: str, base: Mapping[str, str]) -> dict[str, str]:
-    """Child environment: bridge variables in, bot secrets and bot venv out.
-
-    Claude can run `env` through Bash, so the bot token must never reach it.
-    """
-    env = {key: value for key, value in base.items() if key not in SECRET_ENV_VARS}
-    env = _without_bridge_venv(env)
-    env[SOCKET_ENV] = str(config.gate_socket)
-    env[PROJECT_ENV] = project
-    env[TIMEOUT_ENV] = str(config.approval_timeout + HOOK_TIMEOUT_MARGIN)
-    if config.api_key:
-        env["ANTHROPIC_API_KEY"] = config.api_key
-    # Explicit either way: the bot's own shell may carry another profile.
-    env.pop(CONFIG_DIR_ENV, None)
-    if config.config_dir is not None:
-        env[CONFIG_DIR_ENV] = str(config.config_dir)
-    return env
-
-
-def user_message(text: str) -> bytes:
-    payload = {
-        "type": "user",
-        "message": {"role": "user", "content": [{"type": "text", "text": text}]},
-    }
-    return json.dumps(payload).encode() + b"\n"
 
 
 class ClaudeSession:
@@ -158,6 +61,7 @@ class ClaudeSession:
         self.cwd = cwd
         self.session_id = session_id
         self.stop_requested = False
+        self._interrupted = False
         self._config = config
         self._is_waiting_for_user = is_waiting_for_user
         self._lock = asyncio.Lock()
@@ -176,14 +80,17 @@ class ClaudeSession:
     async def run_turn(self, text: str, on_event: EventCallback) -> ResultEvent:
         """Send one user message and stream events until Claude's final result."""
         async with self._lock:
+            self._interrupted = False
             resuming = not self.running and self.session_id is not None
             process = await self._ensure_started()
+            if self._interrupted:
+                raise TurnInterruptedError("Turno interrotto dall'utente")
             assert process.stdin is not None
             try:
                 process.stdin.write(user_message(text))
                 await process.stdin.drain()
             except (BrokenPipeError, ConnectionResetError) as exc:
-                raise ClaudeCrashedError(self._crash_details()) from exc
+                raise self._ended_error() from exc
             result = await self._read_until_result(process, on_event)
             if resuming and result.is_error and result.num_turns == 0:
                 await self._reap()
@@ -251,7 +158,7 @@ class ClaudeSession:
             line = await self._next_line(process)
             if not line:
                 await self._reap()
-                raise ClaudeCrashedError(self._crash_details())
+                raise self._ended_error()
             for event in parse_line(line):
                 if isinstance(event, InitEvent) and event.session_id:
                     self.session_id = event.session_id
@@ -259,6 +166,12 @@ class ClaudeSession:
                     self.session_id = event.session_id or self.session_id
                     return event
                 await on_event(event)
+
+    def _ended_error(self) -> ClaudeSessionError:
+        """Why the process went away mid-turn: the user's stop, or a crash."""
+        if self._interrupted:
+            return TurnInterruptedError("Turno interrotto dall'utente")
+        return ClaudeCrashedError(self._crash_details())
 
     def _crash_details(self) -> str:
         code = self._process.returncode if self._process is not None else None
@@ -288,6 +201,28 @@ class ClaudeSession:
             return
         process.kill()
         await process.wait()
+
+    async def interrupt(self) -> bool:
+        """Kill the process in the middle of a turn; False if no turn is running.
+
+        There is no graceful cancel over stdin, so the process is signalled
+        (SIGTERM, then SIGKILL): the transcript is already on disk and the next
+        turn resumes the same session.
+        """
+        if not self.busy:
+            return False
+        self._interrupted = True
+        process = self._process
+        if process is None or process.returncode is not None:
+            # Still spawning: run_turn checks the flag before sending the message.
+            return True
+        process.terminate()
+        with contextlib.suppress(TimeoutError):
+            await asyncio.wait_for(process.wait(), STOP_GRACE_SECONDS)
+            return True
+        process.kill()
+        await process.wait()
+        return True
 
     async def stop(self) -> None:
         """Close the process cleanly: EOF on stdin, then SIGTERM, then SIGKILL."""

@@ -15,6 +15,7 @@ logger = logging.getLogger(__name__)
 APPROVAL_PREFIX = "ap"
 DECISION_LABELS = {
     ApprovalDecision.APPROVE: "✅ Approvato",
+    ApprovalDecision.APPROVE_ALWAYS: "🔁 Approvato per la sessione",
     ApprovalDecision.DENY: "❌ Negato",
     ApprovalDecision.DENY_AND_STOP: "🚫 Negato, sessione fermata",
 }
@@ -23,17 +24,27 @@ BUTTON_LABELS = {
     ApprovalDecision.DENY: "❌ Nega",
     ApprovalDecision.DENY_AND_STOP: "🚫 Nega e stop sessione",
 }
+ALWAYS_BASH_LABEL = "🔁 Sempre questo comando"
+ALWAYS_TOOL_LABEL = "🔁 Sempre {tool} in questa sessione"
 RESTART_NOTE = "⚠️ Richiesta annullata: il bot è stato riavviato."
 
 
-def approval_keyboard(approval_id: str) -> InlineKeyboardMarkup:
-    def button(decision: ApprovalDecision) -> InlineKeyboardButton:
+def _always_label(tool_name: str) -> str:
+    # Mirrors permission_gate.grant_key: Bash grants one command, the rest the tool.
+    if tool_name == "Bash":
+        return ALWAYS_BASH_LABEL
+    return ALWAYS_TOOL_LABEL.format(tool=tool_name)
+
+
+def approval_keyboard(approval_id: str, tool_name: str) -> InlineKeyboardMarkup:
+    def button(decision: ApprovalDecision, label: str | None = None) -> InlineKeyboardButton:
         data = f"{APPROVAL_PREFIX}:{approval_id}:{decision.value}"
-        return InlineKeyboardButton(BUTTON_LABELS[decision], callback_data=data)
+        return InlineKeyboardButton(label or BUTTON_LABELS[decision], callback_data=data)
 
     return InlineKeyboardMarkup(
         [
             [button(ApprovalDecision.APPROVE), button(ApprovalDecision.DENY)],
+            [button(ApprovalDecision.APPROVE_ALWAYS, _always_label(tool_name))],
             [button(ApprovalDecision.DENY_AND_STOP)],
         ]
     )
@@ -60,7 +71,7 @@ class TelegramApprovalPresenter:
                 chat_id=chat_id,
                 text=text,
                 parse_mode=ParseMode.HTML,
-                reply_markup=approval_keyboard(request.approval_id),
+                reply_markup=approval_keyboard(request.approval_id, request.tool_name),
             )
         )
         self._prompts[request.approval_id] = (chat_id, message.message_id, text)

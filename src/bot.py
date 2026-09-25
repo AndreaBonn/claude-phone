@@ -21,7 +21,7 @@ from telegram.ext import (
 
 from src.auth import build_auth_guard
 from src.bridge_context import BRIDGE_KEY, BridgeContext
-from src.claude_session import SYSTEM_PROMPT_PATH, SessionConfig
+from src.claude_command import SYSTEM_PROMPT_PATH, SessionConfig
 from src.config import PROJECT_ROOT, Settings, format_config_error
 from src.handlers import callbacks, commands, messages, profile
 from src.logging_setup import setup_logging
@@ -34,7 +34,7 @@ from src.session_manager import SessionManager
 from src.session_store import SessionStore
 from src.telegram_io import send_text
 from src.telegram_presenter import APPROVAL_PREFIX, TelegramApprovalPresenter
-from src.turn_runner import AUDIT_DETAIL_MAX, CHOICE_PREFIX
+from src.turn_runner import AUDIT_DETAIL_MAX, CHOICE_PREFIX, STOP_PREFIX
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +47,7 @@ BOT_COMMANDS = [
     BotCommand("start", "Benvenuto e lista progetti"),
     BotCommand("projects", "Progetti disponibili"),
     BotCommand("switch", "Cambia progetto: /switch <nome>"),
+    BotCommand("stop", "Ferma Claude nel turno in corso"),
     BotCommand("new", "Nuova sessione per il progetto attivo"),
     BotCommand("clear", "Come /new, per chi arriva da Claude Code"),
     BotCommand("status", "Stato di progetto, sessione e approvazioni"),
@@ -176,6 +177,7 @@ def register_handlers(app: AnyApplication, allowed_users: frozenset[int]) -> Non
     app.add_handler(CommandHandler("start", commands.start))
     app.add_handler(CommandHandler("projects", commands.projects))
     app.add_handler(CommandHandler("switch", commands.switch))
+    app.add_handler(CommandHandler("stop", commands.stop))
     app.add_handler(CommandHandler(["new", "clear"], commands.new_session))
     app.add_handler(CommandHandler("status", commands.status))
     app.add_handler(CommandHandler("verbose", commands.verbose))
@@ -191,6 +193,7 @@ def register_handlers(app: AnyApplication, allowed_users: frozenset[int]) -> Non
     )
     app.add_handler(CallbackQueryHandler(callbacks.handle_approval, pattern=f"^{APPROVAL_PREFIX}:"))
     app.add_handler(CallbackQueryHandler(callbacks.handle_choice, pattern=f"^{CHOICE_PREFIX}:"))
+    app.add_handler(CallbackQueryHandler(callbacks.handle_stop, pattern=f"^{STOP_PREFIX}:"))
     app.add_handler(CallbackQueryHandler(callbacks.handle_project_pick, pattern=r"^pj:"))
     app.add_handler(CallbackQueryHandler(callbacks.handle_project_page, pattern=r"^pg:"))
     app.add_handler(CallbackQueryHandler(callbacks.handle_profile_pick, pattern=r"^pf:"))

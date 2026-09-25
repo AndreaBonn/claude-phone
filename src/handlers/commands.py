@@ -5,13 +5,14 @@ from src.bridge_context import get_bridge
 from src.handlers.projects import project_keyboard, projects_text, switch_project
 from src.project_manager import SandboxError
 from src.telegram_io import send_text
+from src.turn_runner import stop_turn
 
 VERBOSE_HELP = "Uso: /verbose 0|1|2 (0 solo risposta, 1 tool in tempo reale, 2 tool e input)"
 VERBOSE_LEVELS = ("0", "1", "2")
 WELCOME = (
     "🤖 Bridge Claude Code attivo.\n"
     "Scegli un progetto, poi scrivimi normalmente: inoltro tutto a Claude Code.\n"
-    "Comandi: /projects /switch <nome> /new /clear /status /verbose <0|1|2> /profile"
+    "Comandi: /projects /switch <nome> /stop /new /clear /status /verbose <0|1|2> /profile"
 )
 UNKNOWN_COMMAND = "Comando sconosciuto, per una nuova sessione usa /new o /clear."
 
@@ -61,8 +62,21 @@ async def new_session(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         reply = f"⏳ Claude sta lavorando su {project}: attendi la fine del turno."
     else:
         await bridge.broker.cancel(project)
+        bridge.broker.revoke_grants(project)
         await bridge.sessions.reset(project)
         reply = f"🆕 Sessione azzerata per {project}: il prossimo messaggio ne apre una nuova."
+    await send_text(context.bot, chat_id, reply)
+
+
+async def stop(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/stop — interrupt Claude's running turn in the active project."""
+    bridge = get_bridge(context)
+    user_id, chat_id = _ids(update)
+    project = bridge.store.get_active_project(user_id)
+    if project is None:
+        reply = "Nessun progetto attivo: usa /projects."
+    else:
+        reply = await stop_turn(bridge, project)
     await send_text(context.bot, chat_id, reply)
 
 
@@ -81,9 +95,11 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if project is not None:
         state = "al lavoro" if bridge.sessions.is_busy(project) else "in attesa"
         running = "attivo" if bridge.sessions.is_running(project) else "spento"
+        grants = ", ".join(bridge.broker.grants(project)) or "nessuno"
         lines += [
             f"🧵 Sessione: {bridge.sessions.session_id(project) or 'nuova'}",
             f"⚙️ Processo Claude: {running}, {state}",
+            f"🔁 Approvati per la sessione: {grants}",
         ]
     lines += [
         f"👤 Profilo Claude: {bridge.sessions.profile}",

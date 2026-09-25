@@ -7,11 +7,11 @@ from typing import Any
 
 import pytest
 
+from src.claude_command import SessionConfig, build_command
 from src.claude_session import (
     ClaudeCrashedError,
     ClaudeTimeoutError,
-    SessionConfig,
-    build_command,
+    TurnInterruptedError,
 )
 from src.project_manager import ProjectManager, Sandbox
 from src.session_manager import SessionManager
@@ -196,7 +196,7 @@ async def test_huge_stderr_line_does_not_block_the_child(
 
 
 def test_build_env_sets_configured_claude_profile(tmp_path: Path) -> None:
-    from src.claude_session import build_env
+    from src.claude_command import build_env
 
     config = SessionConfig(
         ("claude",), ("Read",), tmp_path / "s", 300, 300, "p", config_dir=tmp_path / "profile"
@@ -234,7 +234,7 @@ async def test_profile_switch_is_refused_while_busy(harness: Harness, tmp_path: 
 
 
 def test_build_env_drops_the_bridge_virtualenv(tmp_path: Path) -> None:
-    from src.claude_session import build_env
+    from src.claude_command import build_env
     from src.config import PROJECT_ROOT
 
     venv = PROJECT_ROOT / ".venv"
@@ -250,7 +250,7 @@ def test_build_env_drops_the_bridge_virtualenv(tmp_path: Path) -> None:
 
 
 def test_build_env_keeps_a_foreign_virtualenv(tmp_path: Path) -> None:
-    from src.claude_session import build_env
+    from src.claude_command import build_env
 
     base = {"VIRTUAL_ENV": "/work/.venv", "PATH": "/work/.venv/bin:/usr/bin"}
     config = SessionConfig(("claude",), ("Read",), tmp_path / "s", 300, 300, "p")
@@ -305,7 +305,7 @@ async def test_stopping_a_session_never_started_is_a_no_op(harness: Harness) -> 
 
 
 def test_build_env_passes_the_api_key_only_when_configured(tmp_path: Path) -> None:
-    from src.claude_session import build_env
+    from src.claude_command import build_env
 
     with_key = SessionConfig(("c",), ("Read",), tmp_path / "s", 300, 300, "p", api_key="sk-1")
     assert build_env(with_key, "p", {})["ANTHROPIC_API_KEY"] == "sk-1"
@@ -323,3 +323,73 @@ async def test_session_id_is_read_from_the_live_session(harness: Harness) -> Non
 def test_request_stop_for_an_idle_project_is_a_no_op(harness: Harness) -> None:
     harness.manager.request_stop("sandbox/never-used")
     assert harness.manager.is_running("sandbox/never-used") is False
+
+
+async def test_interrupt_ends_the_turn_and_keeps_the_session_resumable(
+    harness: Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("FAKE_SCENARIO", "hang")
+    turn = asyncio.create_task(harness.manager.run_turn(PROJECT, "hi", harness.on_event))
+    await wait_until(lambda: harness.manager.session_id(PROJECT) is not None, "session id known")
+    assert await harness.manager.interrupt(PROJECT) is True
+    with pytest.raises(TurnInterruptedError):
+        await asyncio.wait_for(turn, 5)
+    interrupted_id = harness.manager.session_id(PROJECT)
+    monkeypatch.setenv("FAKE_SCENARIO", "echo")
+    outcome = await harness.manager.run_turn(PROJECT, "again", harness.on_event)
+    assert outcome.result.text == "echo: again"
+    assert outcome.result.session_id == interrupted_id
+    assert "--resume" in harness.starts()[-1]["argv"]
+    await harness.manager.stop_all()
+
+
+async def test_interrupt_kills_a_process_that_ignores_sigterm(
+    harness: Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("FAKE_SCENARIO", "stubborn")
+    monkeypatch.setattr("src.claude_session.STOP_GRACE_SECONDS", 0.2)
+    turn = asyncio.create_task(harness.manager.run_turn(PROJECT, "hi", harness.on_event))
+    await wait_until(lambda: harness.manager.is_busy(PROJECT), "turn started")
+    assert await harness.manager.interrupt(PROJECT) is True
+    with pytest.raises(TurnInterruptedError):
+        await asyncio.wait_for(turn, 5)
+
+
+async def test_interrupt_of_an_idle_project_does_nothing(harness: Harness) -> None:
+    assert await harness.manager.interrupt(PROJECT) is False
+    await harness.manager.run_turn(PROJECT, "hi", harness.on_event)
+    assert await harness.manager.interrupt(PROJECT) is False
+    assert harness.manager.is_running(PROJECT) is True
+    await harness.manager.stop_all()
+
+
+async def test_a_turn_after_an_interrupted_one_is_not_reported_as_interrupted(
+    harness: Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("FAKE_SCENARIO", "hang")
+    turn = asyncio.create_task(harness.manager.run_turn(PROJECT, "hi", harness.on_event))
+    await wait_until(lambda: harness.manager.is_busy(PROJECT), "turn started")
+    await harness.manager.interrupt(PROJECT)
+    await asyncio.gather(turn, return_exceptions=True)
+    monkeypatch.setenv("FAKE_SCENARIO", "crash")
+    with pytest.raises(ClaudeCrashedError) as info:
+        await harness.manager.run_turn(PROJECT, "hi", harness.on_event)
+    assert not isinstance(info.value, TurnInterruptedError)
+
+
+async def test_interrupt_while_the_process_is_still_spawning_stops_the_turn(
+    harness: Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    session = harness.manager.get(PROJECT)
+    spawn = session._ensure_started
+    stop_results: list[bool] = []
+
+    async def stop_during_spawn() -> asyncio.subprocess.Process:
+        stop_results.append(await harness.manager.interrupt(PROJECT))
+        return await spawn()
+
+    monkeypatch.setattr(session, "_ensure_started", stop_during_spawn)
+    with pytest.raises(TurnInterruptedError):
+        await harness.manager.run_turn(PROJECT, "hi", harness.on_event)
+    assert stop_results == [True]
+    await harness.manager.stop_all()

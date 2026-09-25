@@ -2,6 +2,7 @@ from src.message_formatter import (
     MAX_CHOICES,
     describe_event,
     extract_choices,
+    extract_files,
     format_approval_request,
     format_tool_line,
     render_progress,
@@ -146,3 +147,13 @@ def test_format_approval_request_mcp_tool_shows_its_arguments() -> None:
     )
     assert "<b>mcp__aws__call_aws</b>" in text
     assert "aws s3 rm s3://bucket --recursive" in text
+
+
+def test_extract_files_pulls_attachment_lines() -> None:
+    text = "Report ready.\n[[file: out/report.pdf]]\n  [[file:  chart.png ]]\n"
+    assert extract_files(text) == ("Report ready.", ["out/report.pdf", "chart.png"])
+
+
+def test_extract_files_ignores_inline_mentions() -> None:
+    inline = "Use [[file: x]] syntax"
+    assert extract_files(inline) == (inline, [])

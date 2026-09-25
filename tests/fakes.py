@@ -3,6 +3,7 @@ import html
 import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
@@ -36,6 +37,8 @@ class FakeBot:
         self.commands: list[Any] = []
         # Chats that have not started the bot: Telegram answers Forbidden.
         self.blocked_chats: set[int] = set()
+        # (chat_id, file content, filename) of every document sent.
+        self.documents: list[tuple[int, bytes, str]] = []
 
     async def set_my_commands(self, commands: list[Any]) -> bool:
         self.commands = list(commands)
@@ -54,6 +57,10 @@ class FakeBot:
         message = SentMessage(chat_id, len(self.messages) + 1, text, parse_mode, reply_markup)
         self.messages.append(message)
         return message
+
+    async def send_document(self, chat_id: int, document: Any, filename: str | None = None) -> None:
+        path = Path(document)
+        self.documents.append((chat_id, path.read_bytes(), filename or path.name))
 
     async def edit_message_text(
         self,
@@ -113,3 +120,14 @@ class FakeCallbackQuery:
         if self._fail_markup_edit:
             raise BadRequest("Message to edit not found")
         self.markup_dropped = reply_markup is None
+
+
+async def grant_always(broker: Any, project: str, cwd: str, tool: str, tool_input: Any) -> None:
+    """Answer one real gate request with "approve always", as the button would."""
+    from src.permission_gate import ApprovalDecision
+
+    payload = {"project": project, "tool_name": tool, "tool_input": tool_input, "cwd": cwd}
+    gate = asyncio.create_task(broker.handle_request(payload))
+    await wait_until(lambda: bool(broker.pending(project)), "approval requested")
+    broker.resolve(broker.pending(project)[0].approval_id, ApprovalDecision.APPROVE_ALWAYS)
+    await asyncio.wait_for(gate, 5)

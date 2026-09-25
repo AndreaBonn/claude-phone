@@ -15,7 +15,7 @@ from src.handlers.projects import (
 from src.permission_gate import ApprovalDecision
 from src.project_manager import SandboxError
 from src.telegram_presenter import DECISION_LABELS
-from src.turn_runner import TurnRequest, run_user_turn
+from src.turn_runner import TurnRequest, run_user_turn, stop_turn
 
 logger = logging.getLogger(__name__)
 
@@ -80,6 +80,19 @@ async def handle_choice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     chat_id = query.message.chat.id if query.message is not None else user.id
     request = TurnRequest(chat_id=chat_id, user_id=user.id, project=project, text=label)
     await run_user_turn(bridge, context.bot, request)
+
+
+async def handle_stop(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """`sp:<project token>` — the Stop button under the 'working…' message."""
+    bridge = get_bridge(context)
+    query = update.callback_query
+    assert query is not None
+    fields = _parse(query.data, parts=2)
+    project = find_project(bridge, fields[1]) if fields else None
+    if project is None:
+        await query.answer(INVALID_BUTTON)
+        return
+    await query.answer(await stop_turn(bridge, project))
 
 
 async def handle_project_pick(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

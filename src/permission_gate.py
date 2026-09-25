@@ -19,6 +19,9 @@ SOCKET_MODE = 0o600
 
 class ApprovalDecision(StrEnum):
     APPROVE = "approve"
+    # Approve now and grant the project the same exact Bash command, or the whole
+    # non-Bash tool, until the grants are revoked (see grant_key).
+    APPROVE_ALWAYS = "always"
     DENY = "deny"
     DENY_AND_STOP = "stop"
 
@@ -52,6 +55,16 @@ EXPIRED_NOTE = "⏱️ Tempo scaduto: azione negata"
 CANCELLED_NOTE = "🚫 Richiesta annullata"
 
 
+def grant_key(tool_name: str, tool_input: dict[str, Any]) -> str:
+    """What an "approve always" covers: one exact Bash command, or a whole other tool.
+
+    Bash is never granted as a tool: `npm test` must not pre-approve `rm -rf`.
+    """
+    if tool_name == "Bash":
+        return f"Bash: {tool_input.get('command', '')}"
+    return tool_name
+
+
 def _response(decision: str, reason: str = "", stop: bool = False) -> dict[str, Any]:
     return {"decision": decision, "reason": reason, "stop": stop}
 
@@ -78,11 +91,23 @@ class ApprovalBroker:
         self._audit = audit
         self._on_stop = on_stop
         self._pending: dict[str, ApprovalRequest] = {}
+        # project -> grant keys; in memory only, so a restart revokes everything.
+        self._grants: dict[str, set[str]] = {}
         self._server: asyncio.AbstractServer | None = None
         self._socket_path: Path | None = None
 
     def pending(self, project: str | None = None) -> list[ApprovalRequest]:
         return [r for r in self._pending.values() if project is None or r.project == project]
+
+    def grants(self, project: str) -> list[str]:
+        return sorted(self._grants.get(project, set()))
+
+    def revoke_grants(self, project: str | None) -> None:
+        """Forget the "approve always" answers of one project, or of all."""
+        if project is None:
+            self._grants.clear()
+        else:
+            self._grants.pop(project, None)
 
     async def start(self, socket_path: Path) -> None:
         socket_path.parent.mkdir(parents=True, exist_ok=True)
@@ -144,14 +169,21 @@ class ApprovalBroker:
         if verdict.action is GateAction.BLOCK:
             self._record(project, tool, tool_input, "blocked", verdict.reason)
             return _response("deny", verdict.reason)
+        # After the sandbox check: a grant never lets a path escape it.
+        key = grant_key(tool, tool_input)
+        if key in self._grants.get(project, set()):
+            self._record(project, tool, tool_input, "session-approved", "")
+            return _response("allow", "Approvato per la sessione")
         decision, note = await self._ask_user(project, tool, tool_input, verdict.reason)
         self._record(project, tool, tool_input, decision.value, note)
+        if decision is ApprovalDecision.APPROVE_ALWAYS:
+            self._grants.setdefault(project, set()).add(key)
         return self._decision_response(project, decision, note)
 
     def _decision_response(
         self, project: str, decision: ApprovalDecision, note: str
     ) -> dict[str, Any]:
-        if decision is ApprovalDecision.APPROVE:
+        if decision in (ApprovalDecision.APPROVE, ApprovalDecision.APPROVE_ALWAYS):
             return _response("allow", "Approvato dall'utente su Telegram")
         if decision is ApprovalDecision.DENY_AND_STOP:
             if self._on_stop is not None:

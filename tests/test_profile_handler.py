@@ -8,7 +8,7 @@ from src.bridge_context import BRIDGE_KEY, BridgeContext
 from src.handlers import profile
 from src.handlers.profile import BUSY_REPLY, select_profile
 from tests.conftest import ALPHA, USER
-from tests.fakes import FakeBot, wait_until
+from tests.fakes import FakeBot, grant_always, wait_until
 
 
 def command(bridge: BridgeContext, bot: FakeBot, *args: str) -> tuple[Update, Any]:
@@ -55,3 +55,10 @@ async def test_profile_switch_is_refused_while_claude_works(
     assert reply == BUSY_REPLY
     assert bridge.sessions.profile == "default"
     assert bridge.store.get_profile(USER) is None
+
+
+async def test_profile_switch_revokes_every_grant(bridge: BridgeContext) -> None:
+    cwd = str(bridge.settings.approved_directory[0] / "alpha")
+    await grant_always(bridge.broker, ALPHA, cwd, "Edit", {"file_path": "a"})
+    await select_profile(bridge, USER, "sales")
+    assert bridge.broker.grants(ALPHA) == []
