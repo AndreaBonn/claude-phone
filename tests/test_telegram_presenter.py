@@ -4,7 +4,12 @@ from typing import Any
 from src.bridge_context import BridgeContext
 from src.message_formatter import APPROVAL_SNIPPET_MAX
 from src.permission_gate import ApprovalDecision, ApprovalRequest
-from src.telegram_presenter import DECISION_LABELS, RESTART_NOTE, TRUNCATED_NOTE
+from src.telegram_presenter import (
+    DECISION_LABELS,
+    HIDDEN_CHARS_NOTE,
+    RESTART_NOTE,
+    TRUNCATED_NOTE,
+)
 from tests.conftest import ALPHA, USER
 from tests.fakes import FakeBot, SentMessage
 
@@ -94,3 +99,22 @@ async def test_prompt_for_a_non_grantable_call_has_no_always_button(
     request.grantable = False
     await bridge.presenter.show(request)
     assert not any(data.endswith(":always") for data in button_data(bot.messages[-1]))
+
+
+async def test_prompt_warns_about_hidden_characters(bridge: BridgeContext, bot: FakeBot) -> None:
+    await bridge.presenter.show(approval(command="ls\u202e\u200b"))
+    assert HIDDEN_CHARS_NOTE.format(count=2) in bot.messages[-1].shown
+    assert [data.rsplit(":", 1)[1] for data in button_data(bot.messages[-1])] == [
+        "approve",
+        "deny",
+        "always",
+        "stop",
+    ]
+
+
+async def test_prompt_without_hidden_characters_has_no_warning(
+    bridge: BridgeContext, bot: FakeBot
+) -> None:
+    await bridge.presenter.show(approval(command="ls -la"))
+    assert HIDDEN_CHARS_NOTE.format(count=0) not in bot.messages[-1].shown
+    assert "invisibili" not in bot.messages[-1].shown

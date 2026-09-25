@@ -1,6 +1,7 @@
 import html
 import json
 import re
+import unicodedata
 from pathlib import PurePath
 from typing import Any
 
@@ -38,6 +39,14 @@ TEXT_PREVIEW_MAX = 300
 TEXT_FULL_MAX = 1500
 CONTEXT_LINE_MAX = 120
 _CHOICE = re.compile(r"^[ \t]*\[\[option:[ \t]*(.+?)[ \t]*\]\][ \t]*$", re.MULTILINE)
+# Characters that render as nothing or reorder the text around them: format
+# (zero-width, bidi overrides, BOM, tags), controls other than newline and tab,
+# the Hangul fillers that display as blank space, and variation selectors
+# (invisible after any character; emoji use U+FE0F, an accepted false positive).
+HIDDEN_CATEGORIES = frozenset({"Cf", "Cc"})
+VISIBLE_CONTROLS = frozenset({"\n", "\t"})
+BLANK_LETTERS = frozenset({"\u115f", "\u1160", "\u3164", "\uffa0"})
+VARIATION_SELECTORS = (range(0xFE00, 0xFE10), range(0xE0100, 0xE01F0))
 _FILE = re.compile(r"^[ \t]*\[\[file:[ \t]*(.+?)[ \t]*\]\][ \t]*$", re.MULTILINE)
 
 
@@ -124,6 +133,20 @@ def approval_overflow(tool_name: str, tool_input: dict[str, Any]) -> str | None:
     """
     full = _approval_body(tool_name, tool_input, edit_side_max=None)
     return None if full == _shown_approval_body(tool_name, tool_input) else full
+
+
+def count_hidden_characters(tool_name: str, tool_input: dict[str, Any]) -> int:
+    """Invisible or reordering characters in the full approval body, cut part included."""
+    body = _approval_body(tool_name, tool_input, edit_side_max=None)
+    return sum(1 for char in body if _is_hidden(char))
+
+
+def _is_hidden(char: str) -> bool:
+    if char in VISIBLE_CONTROLS:
+        return False
+    if unicodedata.category(char) in HIDDEN_CATEGORIES or char in BLANK_LETTERS:
+        return True
+    return any(ord(char) in selectors for selectors in VARIATION_SELECTORS)
 
 
 def format_approval_request(project: str, tool_name: str, tool_input: dict[str, Any]) -> str:

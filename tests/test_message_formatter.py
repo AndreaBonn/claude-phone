@@ -1,7 +1,10 @@
+import pytest
+
 from src.message_formatter import (
     APPROVAL_SNIPPET_MAX,
     MAX_CHOICES,
     approval_overflow,
+    count_hidden_characters,
     describe_event,
     extract_choices,
     extract_files,
@@ -188,3 +191,35 @@ def test_approval_overflow_covers_tools_shown_as_json() -> None:
     body = "z" * APPROVAL_SNIPPET_MAX + "TAIL"
     full = approval_overflow(tool_name="mcp__mail__send", tool_input={"body": body})
     assert full is not None and "TAIL" in full
+
+
+@pytest.mark.parametrize(
+    "hidden",
+    [
+        "\u202e",
+        "\u2066",
+        "\u200b",
+        "\u200d",
+        "\ufeff",
+        "\u00ad",
+        "\x1b",
+        "\r",
+        "\u3164",
+        "\ufe00",
+        "\U000e0100",
+        "\U000e0041",
+    ],
+)
+def test_count_hidden_characters_finds_invisible_and_bidi_marks(hidden: str) -> None:
+    tool_input = {"command": f"echo safe{hidden}; rm -rf build"}
+    assert count_hidden_characters(tool_name="Bash", tool_input=tool_input) == 1
+
+
+def test_count_hidden_characters_ignores_ordinary_text_and_layout() -> None:
+    tool_input = {"command": 'for f in *.py; do\n\techo "$f" àèé 日本\ndone'}
+    assert count_hidden_characters(tool_name="Bash", tool_input=tool_input) == 0
+
+
+def test_count_hidden_characters_looks_past_the_truncated_part() -> None:
+    command = "echo " + "x" * APPROVAL_SNIPPET_MAX + "\u202e"
+    assert count_hidden_characters(tool_name="Bash", tool_input={"command": command}) == 1

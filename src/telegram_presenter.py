@@ -5,7 +5,11 @@ from typing import Any
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.constants import ParseMode
 
-from src.message_formatter import approval_overflow, format_approval_request
+from src.message_formatter import (
+    approval_overflow,
+    count_hidden_characters,
+    format_approval_request,
+)
 from src.permission_gate import ApprovalDecision, ApprovalRequest
 from src.session_store import SessionStore
 from src.telegram_io import edit_text, send_text, with_retry
@@ -28,6 +32,10 @@ ALWAYS_BASH_LABEL = "🔁 Sempre questo comando"
 ALWAYS_TOOL_LABEL = "🔁 Sempre {tool} in questa sessione"
 RESTART_NOTE = "⚠️ Richiesta annullata: il bot è stato riavviato."
 TRUNCATED_NOTE = "⚠️ Contenuto troncato ({length} caratteri): quello completo è nell'allegato"
+HIDDEN_CHARS_NOTE = (
+    "⚠️ {count} caratteri invisibili o di controllo della direzione: "
+    "il testo mostrato può non essere quello eseguito"
+)
 FULL_BODY_FILENAME = "approvazione-{approval_id}.txt"
 
 
@@ -68,6 +76,9 @@ class TelegramApprovalPresenter:
         text = format_approval_request(request.project, request.tool_name, request.tool_input)
         if request.warning:
             text += f"\n{html.escape(request.warning)}"
+        hidden = count_hidden_characters(request.tool_name, request.tool_input)
+        if hidden:
+            text += f"\n{html.escape(HIDDEN_CHARS_NOTE.format(count=hidden))}"
         # A cut body goes out in full first, and "always" is withheld: nobody
         # grants for good what they could not read. A failed upload raises,
         # and the broker denies the call.
