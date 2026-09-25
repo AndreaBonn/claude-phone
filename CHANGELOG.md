@@ -16,6 +16,7 @@ All notable changes to this project are documented here. The format follows [Kee
 ### Fixed
 
 - An approval prompt that cannot show the whole command or content now sends it in full as a `.txt` attachment and hides the "approve always" button.
+- Writing a file that Claude Code or git executes on its own (`.claude/`, `.git/`, `.mcp.json`, `.envrc`) always asks and can never be granted with "approve always".
 
 ## [0.1.0] - 2026-09-25
 
