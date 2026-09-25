@@ -12,7 +12,7 @@ Un bot Telegram che ti fa usare dal telefono il Claude Code installato sul tuo P
 
 Quello che scrivi al bot arriva a Claude Code; quello che Claude Code fa e risponde torna in chat. Quando Claude vuole eseguire un comando o modificare un file, il bot ti chiede prima il permesso.
 
-Il bot non parte mai da solo: lo accendi con `./start.sh` quando vuoi essere raggiungibile e lo spegni con `./stop.sh`. È uno strumento per un solo utente: ogni messaggio va a un processo locale `claude -p` (stream-json in ingresso e in uscita), uno per progetto, e un hook `PreToolUse` fa passare ogni chiamata a uno strumento da un gate di permessi a cui rispondi da Telegram. L'architettura è ispirata a [RichardAtCT/claude-code-telegram](https://github.com/RichardAtCT/claude-code-telegram), ma il codice è scritto da zero con un perimetro più ridotto.
+Il bot non parte mai da solo: lo accendi con `./start.sh` quando vuoi essere raggiungibile e lo spegni con `./stop.sh`. È uno strumento per un solo utente: ogni messaggio va a un processo locale `claude -p` (stream-json in ingresso e in uscita), uno per progetto, e un hook `PreToolUse` fa passare ogni chiamata a uno strumento da un gate di permessi a cui rispondi da Telegram.
 
 ## In pratica
 

@@ -12,7 +12,7 @@ A Telegram bot that lets you drive the Claude Code installed on your Linux PC fr
 
 What you write to the bot reaches Claude Code; what Claude Code does and answers comes back to the chat. When Claude wants to run a command or change a file, the bot asks for your permission first.
 
-The bot never starts on its own: you switch it on with `./start.sh` when you want to be reachable and off with `./stop.sh`. It is a single-user tool: each message goes to a local `claude -p` process (stream-json in and out), one per project, and a `PreToolUse` hook routes every tool call through a permission gate that you answer from Telegram. The architecture is inspired by [RichardAtCT/claude-code-telegram](https://github.com/RichardAtCT/claude-code-telegram), written from scratch with a narrower scope.
+The bot never starts on its own: you switch it on with `./start.sh` when you want to be reachable and off with `./stop.sh`. It is a single-user tool: each message goes to a local `claude -p` process (stream-json in and out), one per project, and a `PreToolUse` hook routes every tool call through a permission gate that you answer from Telegram.
 
 ## In practice
 
