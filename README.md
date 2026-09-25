@@ -4,6 +4,7 @@
 
 A Telegram bot that lets you drive the Claude Code installed on your Linux PC from your phone, approving every risky action with a button.
 
+[![CI](https://github.com/AndreaBonn/claude-phone/actions/workflows/ci.yml/badge.svg)](https://github.com/AndreaBonn/claude-phone/actions/workflows/ci.yml)
 ![License: Apache 2.0](https://img.shields.io/badge/license-Apache%202.0-blue)
 ![Python](https://img.shields.io/badge/python-%3E%3D3.11-3776ab)
 ![python-telegram-bot](https://img.shields.io/badge/python--telegram--bot-%3E%3D21-26a5e4)

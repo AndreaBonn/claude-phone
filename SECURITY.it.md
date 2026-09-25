@@ -40,13 +40,13 @@ Il bridge permette a un telefono di pilotare un processo Claude Code che può es
 - **Nessuna porta in ascolto**: il bot usa il long polling di Telegram, solo connessioni in uscita, e scarta gli update ricevuti mentre era spento (`src/bot.py:237`).
 - **Nessun bypass dei permessi**: `--dangerously-skip-permissions` e `bypassPermissions` non compaiono nel codice.
 - **Dipendenze bloccate**: `uv.lock` è versionato e `start.sh` installa con `uv sync --frozen`.
+- **Integrazione continua**: ogni push e pull request esegue ruff, mypy, la suite di test con coverage e `pip-audit` sulle dipendenze runtime bloccate (`.github/workflows/ci.yml`).
 
 ## Limiti noti
 
 - **Il controllo dei percorsi in Bash è best-effort**: il bridge cerca nei comandi di shell i token che sembrano percorsi (`/...`, `~`, `..`) e blocca quelli fuori sandbox (`src/permission_policy.py:64`). Un comando può comunque raggiungere file esterni in modi che una scansione dei token non vede. Per Bash la protezione reale è la tua approvazione: leggi il comando prima di approvarlo.
 - **Autorizzazioni "approva sempre"**: quando autorizzi un intero strumento non-Bash per la sessione, le chiamate successive a quello strumento non ti vengono più mostrate fino a `/new`, a un cambio di profilo o a un riavvio. La sandbox resta attiva.
 - **La tua configurazione di Claude Code viene caricata**: rule, hook, skill, plugin e server MCP del profilo scelto girano dentro le sessioni del bridge. Un hook delle tue impostazioni utente viene eseguito come in una sessione da terminale.
-- **Nessuna scansione automatica delle vulnerabilità**: il repository non ha CI né un job di audit delle dipendenze.
 
 ## Best practice per gli utenti
 
