@@ -11,8 +11,9 @@ VERBOSE_LEVELS = ("0", "1", "2")
 WELCOME = (
     "🤖 Bridge Claude Code attivo.\n"
     "Scegli un progetto, poi scrivimi normalmente: inoltro tutto a Claude Code.\n"
-    "Comandi: /projects /switch <nome> /new /status /verbose <0|1|2> /profile"
+    "Comandi: /projects /switch <nome> /new /clear /status /verbose <0|1|2> /profile"
 )
+UNKNOWN_COMMAND = "Comando sconosciuto, per una nuova sessione usa /new o /clear."
 
 
 def _ids(update: Update) -> tuple[int, int]:
@@ -63,6 +64,12 @@ async def new_session(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         await bridge.sessions.reset(project)
         reply = f"🆕 Sessione azzerata per {project}: il prossimo messaggio ne apre una nuova."
     await send_text(context.bot, chat_id, reply)
+
+
+async def unknown_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Answer commands the bridge does not know instead of dropping them silently."""
+    _, chat_id = _ids(update)
+    await send_text(context.bot, chat_id, UNKNOWN_COMMAND)
 
 
 async def status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

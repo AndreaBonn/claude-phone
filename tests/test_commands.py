@@ -179,3 +179,8 @@ async def test_projects_without_any_project_says_so(bridge: BridgeContext, bot: 
     await commands.projects(*command(bridge, bot))
     assert last_text(bot).startswith("Nessun progetto in ")
     assert bot.messages[-1].reply_markup is None
+
+
+async def test_unknown_command_points_to_new_session(bridge: BridgeContext, bot: FakeBot) -> None:
+    await commands.unknown_command(*command(bridge, bot))
+    assert last_text(bot) == "Comando sconosciuto, per una nuova sessione usa /new o /clear."

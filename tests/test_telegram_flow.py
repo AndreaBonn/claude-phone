@@ -341,3 +341,49 @@ async def test_new_turn_invalidates_old_choice_buttons_of_the_same_project(
     await run_user_turn(bridge, bot, turn("plain question"))
     await bridge.sessions.stop_all()
     assert old_token not in bridge.choices
+
+
+def first_handler_for(bridge: BridgeContext, text: str) -> Any:
+    """The group-0 handler python-telegram-bot would dispatch this private text to."""
+    from datetime import UTC, datetime
+
+    from telegram import Chat, Message, MessageEntity, User
+
+    from src.bot import build_application
+
+    app = build_application(bridge.settings)
+    app.bot_data[BRIDGE_KEY].store.close()
+    entities = []
+    if text.startswith("/"):
+        command_length = len(text.split()[0])
+        entities = [MessageEntity(type=MessageEntity.BOT_COMMAND, offset=0, length=command_length)]
+    message = Message(
+        message_id=1,
+        date=datetime.now(tz=UTC),
+        chat=Chat(id=USER, type=Chat.PRIVATE),
+        from_user=User(id=USER, first_name="u", is_bot=False),
+        text=text,
+        entities=entities,
+    )
+    message.set_bot(cast(Any, SimpleNamespace(username="bridge_bot")))
+    update = Update(update_id=1, message=message)
+    return next(h for h in app.handlers[0] if h.check_update(update))
+
+
+@pytest.mark.parametrize("text", ["/new", "/clear"])
+def test_clear_and_new_both_reset_the_session(bridge: BridgeContext, text: str) -> None:
+    from src.handlers import commands
+
+    assert first_handler_for(bridge, text).callback is commands.new_session
+
+
+def test_unknown_command_gets_a_reply_instead_of_being_dropped(bridge: BridgeContext) -> None:
+    from src.handlers import commands
+
+    assert first_handler_for(bridge, "/compact now").callback is commands.unknown_command
+
+
+def test_plain_text_still_goes_to_claude(bridge: BridgeContext) -> None:
+    from src.handlers import messages
+
+    assert first_handler_for(bridge, "ciao").callback is messages.handle_text

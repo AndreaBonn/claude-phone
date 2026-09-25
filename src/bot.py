@@ -48,6 +48,7 @@ BOT_COMMANDS = [
     BotCommand("projects", "Progetti disponibili"),
     BotCommand("switch", "Cambia progetto: /switch <nome>"),
     BotCommand("new", "Nuova sessione per il progetto attivo"),
+    BotCommand("clear", "Come /new, per chi arriva da Claude Code"),
     BotCommand("status", "Stato di progetto, sessione e approvazioni"),
     BotCommand("verbose", "Dettaglio del progresso: /verbose 0|1|2"),
     BotCommand("profile", "Profilo Claude (cloak) da usare"),
@@ -175,10 +176,14 @@ def register_handlers(app: AnyApplication, allowed_users: frozenset[int]) -> Non
     app.add_handler(CommandHandler("start", commands.start))
     app.add_handler(CommandHandler("projects", commands.projects))
     app.add_handler(CommandHandler("switch", commands.switch))
-    app.add_handler(CommandHandler("new", commands.new_session))
+    app.add_handler(CommandHandler(["new", "clear"], commands.new_session))
     app.add_handler(CommandHandler("status", commands.status))
     app.add_handler(CommandHandler("verbose", commands.verbose))
     app.add_handler(CommandHandler("profile", profile.profile))
+    # After every CommandHandler: a group dispatches to its first match only.
+    app.add_handler(
+        MessageHandler(filters.COMMAND & filters.ChatType.PRIVATE, commands.unknown_command)
+    )
     app.add_handler(
         MessageHandler(
             filters.TEXT & ~filters.COMMAND & filters.ChatType.PRIVATE, messages.handle_text
