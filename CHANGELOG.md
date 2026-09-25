@@ -8,6 +8,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 - GitHub Actions pipeline: ruff, mypy, pytest with branch coverage and `pip-audit` on the locked runtime dependencies.
 - Project metadata in `pyproject.toml`, a changelog of the system prompt versions, this changelog.
+- An approval prompt warns when the command or content holds invisible or direction-changing characters.
+- `systemd/install-unit.sh` generates and installs the systemd user unit for the current checkout.
 
 ### Changed
 
