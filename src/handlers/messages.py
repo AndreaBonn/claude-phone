@@ -19,6 +19,10 @@ NO_PROJECT = "📁 Nessun progetto attivo: scegline uno, poi rimanda il messaggi
 SAVED = "📎 Salvato in `{path}`"
 # Opens the turn a captioned upload starts; the caption follows on its own lines.
 ANNOUNCE = "📎 File ricevuto: {path}"
+UNSUPPORTED = (
+    "⚠️ Posso salvare solo documenti e foto. Per un video o un audio usa 📎 → File, "
+    "così arriva come documento."
+)
 
 
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -85,3 +89,9 @@ async def _store(bridge: BridgeContext, bot: Any, project: str, attachment: Atta
     )
     return str(saved.relative_to(directory.resolve()))
 
+
+async def handle_unsupported_media(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Video, audio and voice notes get an explanation instead of silence."""
+    message = update.effective_message
+    if message is not None:
+        await send_text(context.bot, message.chat_id, UNSUPPORTED)

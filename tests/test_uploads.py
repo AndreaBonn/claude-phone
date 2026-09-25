@@ -5,19 +5,23 @@ from typing import Any, cast
 
 import pytest
 from telegram import (
+    Audio,
     Chat,
     Document,
     Message,
     PhotoSize,
     Update,
     User,
+    Video,
+    VideoNote,
+    Voice,
 )
 from telegram.error import BadRequest, NetworkError
 
 from src.bridge_context import BRIDGE_KEY, BridgeContext
 from src.file_intake import MAX_DOWNLOAD_BYTES, UPLOAD_DIR
 from src.handlers import messages
-from src.handlers.messages import NO_PROJECT
+from src.handlers.messages import NO_PROJECT, UNSUPPORTED
 from tests.conftest import USER
 from tests.fakes import FakeBot
 
@@ -208,3 +212,25 @@ def test_documents_and_photos_reach_the_upload_handler(
 def test_text_still_reaches_the_text_handler(bridge: BridgeContext) -> None:
     assert first_handler_for(bridge, text="ciao").callback is messages.handle_text
 
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        {"video": Video(file_id="v", file_unique_id="w", width=1, height=1, duration=1)},
+        {"audio": Audio(file_id="a", file_unique_id="b", duration=1)},
+        {"voice": Voice(file_id="o", file_unique_id="p", duration=1)},
+        {"video_note": VideoNote(file_id="n", file_unique_id="m", length=1, duration=1)},
+    ],
+)
+def test_other_media_reach_the_unsupported_handler(
+    bridge: BridgeContext, content: dict[str, Any]
+) -> None:
+    assert first_handler_for(bridge, **content).callback is messages.handle_unsupported_media
+
+
+async def test_unsupported_media_explains_how_to_send_a_file(
+    bridge: BridgeContext, bot: FakeBot
+) -> None:
+    await messages.handle_unsupported_media(*upload(bridge, bot))
+    assert bot.messages[-1].shown == UNSUPPORTED
+    assert bot.file_requests == []

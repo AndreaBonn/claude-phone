@@ -198,6 +198,13 @@ def register_handlers(app: AnyApplication, allowed_users: frozenset[int]) -> Non
             messages.handle_attachment,
         )
     )
+    app.add_handler(
+        MessageHandler(
+            (filters.VIDEO | filters.AUDIO | filters.VOICE | filters.VIDEO_NOTE)
+            & filters.ChatType.PRIVATE,
+            messages.handle_unsupported_media,
+        )
+    )
     app.add_handler(CallbackQueryHandler(callbacks.handle_approval, pattern=f"^{APPROVAL_PREFIX}:"))
     app.add_handler(CallbackQueryHandler(callbacks.handle_choice, pattern=f"^{CHOICE_PREFIX}:"))
     app.add_handler(CallbackQueryHandler(callbacks.handle_stop, pattern=f"^{STOP_PREFIX}:"))
