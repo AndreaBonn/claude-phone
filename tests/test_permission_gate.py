@@ -316,6 +316,31 @@ async def test_approve_always_skips_the_prompt_for_the_same_tool(root: Path) -> 
     assert broker.grants("alpha") == ["Edit"]
 
 
+async def test_always_on_a_sensitive_path_approves_once_and_grants_nothing(root: Path) -> None:
+    presenter = FakePresenter(answer=ApprovalDecision.APPROVE_ALWAYS)
+    broker, _, _ = make_broker(root, presenter)
+    hook_file = {"file_path": ".claude/settings.json"}
+    first = await broker.handle_request(request(root, "Write", hook_file))
+    presenter.answer = ApprovalDecision.DENY
+    second = await broker.handle_request(request(root, "Write", hook_file))
+    assert first["decision"] == "allow" and second["decision"] == "deny"
+    assert [shown.grantable for shown in presenter.shown] == [False, False]
+    assert broker.grants("alpha") == []
+
+
+async def test_existing_tool_grant_does_not_cover_a_sensitive_path(root: Path) -> None:
+    presenter = FakePresenter(answer=ApprovalDecision.APPROVE_ALWAYS)
+    broker, _, _ = make_broker(root, presenter)
+    await broker.handle_request(request(root, "Write", {"file_path": "notes.md"}))
+    presenter.answer = None
+    ordinary = await broker.handle_request(request(root, "Write", {"file_path": "other.md"}))
+    presenter.answer = ApprovalDecision.DENY
+    hook = await broker.handle_request(request(root, "Write", {"file_path": ".git/hooks/pre-push"}))
+    assert broker.grants("alpha") == ["Write"]
+    assert ordinary["decision"] == "allow" and hook["decision"] == "deny"
+    assert len(presenter.shown) == 2
+
+
 async def test_bash_grant_covers_only_the_exact_command(root: Path) -> None:
     presenter = FakePresenter(answer=ApprovalDecision.APPROVE_ALWAYS)
     broker, _, _ = make_broker(root, presenter)

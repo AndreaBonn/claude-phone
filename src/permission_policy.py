@@ -20,6 +20,12 @@ NO_EFFECT_TOOLS = frozenset({"TodoWrite", "Task", "Agent", "ExitPlanMode", "Skil
 # always goes through the user's approval (skills run their own scripts).
 READ_ONLY_OK_TOOLS = frozenset({"Read", "Grep", "Glob", "LS", "Bash"})
 UNPARSEABLE_BASH_WARNING = "⚠️ Comando non analizzabile automaticamente: controllalo a mano"
+# Files Claude Code or git execute on their own (project hooks, MCP servers,
+# git hooks, direnv): writing them is code execution outside the gate.
+SELF_EXECUTING_DIRS = frozenset({".claude", ".git"})
+SELF_EXECUTING_FILES = frozenset({".mcp.json", ".envrc"})
+WRITE_TOOLS = frozenset({"Write", "Edit", "MultiEdit", "NotebookEdit"})
+SENSITIVE_PATH_WARNING = "⚠️ File eseguito in automatico da Claude Code o git: niente «Sempre»"
 
 
 class GateAction(StrEnum):
@@ -32,6 +38,8 @@ class GateAction(StrEnum):
 class GateVerdict:
     action: GateAction
     reason: str = ""
+    # False when an "approve always" answer must not become a grant.
+    grantable: bool = True
 
 
 @dataclass(frozen=True)
@@ -75,6 +83,13 @@ def _bash_paths(command: str) -> list[str] | None:
     return paths
 
 
+def _is_self_executing(raw: str, cwd: Path) -> bool:
+    candidate = Path(raw).expanduser()
+    resolved = (candidate if candidate.is_absolute() else cwd / candidate).resolve()
+    in_dir = any(part in SELF_EXECUTING_DIRS for part in resolved.parts)
+    return in_dir or resolved.name in SELF_EXECUTING_FILES
+
+
 def _outside(paths: list[str], cwd: Path, sandbox: Sandbox, read_only_ok: bool) -> str | None:
     for raw in paths:
         try:
@@ -109,6 +124,8 @@ def classify_tool_call(
     escaped = _outside(paths, cwd=cwd, sandbox=policy.sandbox, read_only_ok=read_only_ok)
     if escaped is not None:
         return GateVerdict(GateAction.BLOCK, f"Percorso fuori dalla sandbox: {escaped}")
+    if tool_name in WRITE_TOOLS and any(_is_self_executing(raw, cwd) for raw in paths):
+        return GateVerdict(GateAction.ASK, SENSITIVE_PATH_WARNING, grantable=False)
     if tool_name in policy.auto_approve_tools or tool_name in NO_EFFECT_TOOLS:
         return GateVerdict(GateAction.ALLOW)
     return GateVerdict(GateAction.ASK, warning)

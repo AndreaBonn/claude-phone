@@ -4,6 +4,7 @@ from typing import Any
 import pytest
 
 from src.permission_policy import (
+    SENSITIVE_PATH_WARNING,
     UNPARSEABLE_BASH_WARNING,
     GateAction,
     GatePolicy,
@@ -153,3 +154,42 @@ def test_claude_config_dirs_are_read_only(
 @pytest.mark.parametrize("tool", ["Skill", "ToolSearch"])
 def test_skill_loading_is_allowed(policy: GatePolicy, tool: str) -> None:
     assert classify(policy, tool, {"skill": "scrivi-italiano"}) is GateAction.ALLOW
+
+
+@pytest.mark.parametrize(
+    "path",
+    [".claude/settings.local.json", ".mcp.json", ".git/hooks/pre-commit", ".git/config", ".envrc"],
+)
+@pytest.mark.parametrize("tool", ["Write", "Edit", "MultiEdit", "NotebookEdit"])
+def test_write_to_self_executing_config_always_asks_and_is_not_grantable(
+    policy: GatePolicy, tool: str, path: str
+) -> None:
+    cwd = policy.sandbox.roots[0] / "alpha"
+    field = "notebook_path" if tool == "NotebookEdit" else "file_path"
+    auto_all = GatePolicy(
+        sandbox=policy.sandbox,
+        allowed_tools=policy.allowed_tools,
+        auto_approve_tools=frozenset({tool}),
+    )
+    verdict = classify_tool_call(tool_name=tool, tool_input={field: path}, cwd=cwd, policy=auto_all)
+    assert verdict.action is GateAction.ASK
+    assert verdict.reason == SENSITIVE_PATH_WARNING
+    assert verdict.grantable is False
+
+
+def test_ordinary_write_stays_grantable(policy: GatePolicy) -> None:
+    cwd = policy.sandbox.roots[0] / "alpha"
+    verdict = classify_tool_call(
+        tool_name="Write", tool_input={"file_path": "src/claude_notes.md"}, cwd=cwd, policy=policy
+    )
+    assert verdict.action is GateAction.ASK and verdict.grantable is True
+
+
+def test_symlink_into_git_dir_counts_as_sensitive(policy: GatePolicy) -> None:
+    cwd = policy.sandbox.roots[0] / "alpha"
+    (cwd / ".git" / "hooks").mkdir(parents=True)
+    (cwd / "innocent").symlink_to(cwd / ".git" / "hooks")
+    verdict = classify_tool_call(
+        tool_name="Write", tool_input={"file_path": "innocent/post-merge"}, cwd=cwd, policy=policy
+    )
+    assert verdict.grantable is False

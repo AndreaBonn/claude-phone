@@ -85,3 +85,12 @@ async def test_restart_cleanup_still_notifies_when_old_prompts_cannot_be_edited(
     bridge.store.close()
     assert bot.messages[-1].shown == "⚠️ 1 richieste di approvazione annullate dal riavvio."
     assert RESTART_NOTE not in [m.text for m in bot.messages]
+
+
+async def test_prompt_for_a_non_grantable_call_has_no_always_button(
+    bridge: BridgeContext, bot: FakeBot
+) -> None:
+    request = approval(command="ls")
+    request.grantable = False
+    await bridge.presenter.show(request)
+    assert not any(data.endswith(":always") for data in button_data(bot.messages[-1]))

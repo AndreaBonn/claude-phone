@@ -76,7 +76,9 @@ class TelegramApprovalPresenter:
             await self._send_full_body(chat_id, request.approval_id, full_body)
             text += f"\n{html.escape(TRUNCATED_NOTE.format(length=len(full_body)))}"
         keyboard = approval_keyboard(
-            request.approval_id, request.tool_name, allow_always=full_body is None
+            request.approval_id,
+            request.tool_name,
+            allow_always=full_body is None and request.grantable,
         )
         message = await with_retry(
             lambda: self._bot.send_message(

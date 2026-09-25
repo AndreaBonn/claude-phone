@@ -9,7 +9,7 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Any, Protocol
 
-from src.permission_policy import GateAction, GatePolicy, classify_tool_call
+from src.permission_policy import GateAction, GatePolicy, GateVerdict, classify_tool_call
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +37,8 @@ class ApprovalRequest:
     future: asyncio.Future[ApprovalDecision] = field(
         repr=False, default_factory=lambda: asyncio.get_running_loop().create_future()
     )
+    # False when the policy forbids turning this call into a session grant.
+    grantable: bool = True
 
 
 class ApprovalPresenter(Protocol):
@@ -171,12 +173,14 @@ class ApprovalBroker:
             return _response("deny", verdict.reason)
         # After the sandbox check: a grant never lets a path escape it.
         key = grant_key(tool, tool_input)
-        if key in self._grants.get(project, set()):
+        if verdict.grantable and key in self._grants.get(project, set()):
             self._record(project, tool, tool_input, "session-approved", "")
             return _response("allow", "Approvato per la sessione")
-        decision, note = await self._ask_user(project, tool, tool_input, verdict.reason)
+        decision, note = await self._ask_user(project, tool, tool_input, verdict)
         self._record(project, tool, tool_input, decision.value, note)
-        if decision is ApprovalDecision.APPROVE_ALWAYS:
+        # Checked here too, not only by hiding the button: a crafted callback
+        # can still carry "always".
+        if decision is ApprovalDecision.APPROVE_ALWAYS and verdict.grantable:
             self._grants.setdefault(project, set()).add(key)
         return self._decision_response(project, decision, note)
 
@@ -192,9 +196,16 @@ class ApprovalBroker:
         return _response("deny", note or "L'utente ha negato l'azione su Telegram")
 
     async def _ask_user(
-        self, project: str, tool: str, tool_input: dict[str, Any], warning: str
+        self, project: str, tool: str, tool_input: dict[str, Any], verdict: GateVerdict
     ) -> tuple[ApprovalDecision, str]:
-        request = ApprovalRequest(secrets.token_hex(4), project, tool, tool_input, warning)
+        request = ApprovalRequest(
+            secrets.token_hex(4),
+            project,
+            tool,
+            tool_input,
+            verdict.reason,
+            grantable=verdict.grantable,
+        )
         self._pending[request.approval_id] = request
         try:
             await self._presenter.show(request)
