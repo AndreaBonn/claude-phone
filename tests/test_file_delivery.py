@@ -4,8 +4,9 @@ import pytest
 from telegram.error import BadRequest
 
 from src import file_delivery
-from src.file_delivery import resolve_attachments, send_documents
+from src.file_delivery import WrittenFiles, resolve_attachments, send_documents
 from src.project_manager import Sandbox
+from src.stream_parser import ToolResultEvent, ToolUseEvent
 from tests.fakes import FakeBot
 
 CHAT = 42
@@ -105,3 +106,42 @@ def test_files_beyond_the_cap_are_reported_not_dropped(sandbox: Sandbox) -> None
     paths, problems = resolve_attachments(raw, cwd(sandbox), sandbox)
     assert len(paths) == file_delivery.MAX_FILES
     assert problems == ["⚠️ 2 file non inviati: massimo 10 per messaggio"]
+
+
+def write_call(tool_use_id: str, path: str, tool: str = "Write") -> ToolUseEvent:
+    return ToolUseEvent(tool_use_id=tool_use_id, name=tool, input={"file_path": path})
+
+
+def test_successful_writes_of_deliverables_are_collected() -> None:
+    written = WrittenFiles()
+    for event in (
+        write_call("t1", "CHI_SONO.md"),
+        ToolResultEvent(tool_use_id="t1", is_error=False, content="ok"),
+        write_call("t2", "out/chart.PNG"),
+        ToolResultEvent(tool_use_id="t2", is_error=False, content="ok"),
+    ):
+        written.observe(event)
+    assert written.paths == ["CHI_SONO.md", "out/chart.PNG"]
+
+
+def test_code_edits_and_failed_writes_are_not_collected() -> None:
+    written = WrittenFiles()
+    for event in (
+        write_call("t1", "main.py"),
+        ToolResultEvent(tool_use_id="t1", is_error=False, content="ok"),
+        write_call("t2", "notes.md", tool="Edit"),
+        ToolResultEvent(tool_use_id="t2", is_error=False, content="ok"),
+        write_call("t3", "denied.md"),
+        ToolResultEvent(tool_use_id="t3", is_error=True, content="denied by the user"),
+        write_call("t4", "never-answered.pdf"),
+    ):
+        written.observe(event)
+    assert written.paths == []
+
+
+def test_a_file_written_twice_is_collected_once() -> None:
+    written = WrittenFiles()
+    for tool_use_id in ("t1", "t2"):
+        written.observe(write_call(tool_use_id, "report.md"))
+        written.observe(ToolResultEvent(tool_use_id=tool_use_id, is_error=False, content="ok"))
+    assert written.paths == ["report.md"]

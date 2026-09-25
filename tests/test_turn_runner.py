@@ -139,3 +139,13 @@ def test_answer_with_only_attachments_is_not_reported_as_empty() -> None:
     answer = compose_answer(TurnOutcome(result=result))
     assert answer.text == ATTACHMENTS_ONLY
     assert answer.files == ["a.txt"]
+
+
+async def test_a_written_deliverable_is_attached_without_a_file_line(
+    bridge: BridgeContext, bot: FakeBot, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("FAKE_SCENARIO", "write")
+    await run_user_turn(bridge, bot, turn("Genera un markdown con scritto chi sei"))
+    await bridge.sessions.stop_all()
+    assert bot.documents == [(USER, b"# Chi sono", "CHI_SONO.md")]
+    assert bot.messages[-1].text == "Ho creato CHI_SONO.md."

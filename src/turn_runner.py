@@ -12,7 +12,7 @@ from src.claude_session import (
     EventCallback,
     TurnInterruptedError,
 )
-from src.file_delivery import resolve_attachments, send_documents
+from src.file_delivery import WrittenFiles, resolve_attachments, send_documents
 from src.handlers.projects import project_token
 from src.message_formatter import describe_event, extract_choices, extract_files, truncate
 from src.project_manager import SandboxError
@@ -89,8 +89,11 @@ async def stop_turn(bridge: BridgeContext, project: str) -> str:
     return STOPPED_REPLY.format(project=project)
 
 
-def _progress_callback(progress: ProgressMessage, verbose: int) -> EventCallback:
+def _progress_callback(
+    progress: ProgressMessage, verbose: int, written: WrittenFiles
+) -> EventCallback:
     async def on_event(event: StreamEvent) -> None:
+        written.observe(event)
         line = describe_event(event, verbose)
         if line is not None:
             await progress.add_line(line)
@@ -153,12 +156,13 @@ async def run_user_turn(bridge: BridgeContext, bot: Any, request: TurnRequest) -
             bot, request.chat_id, f"⏳ {project}: sto lavorando…", stop_keyboard(project)
         )
         bridge.forget_choices(project)
-        on_event = _progress_callback(progress, _verbosity(bridge, request))
+        written = WrittenFiles()
+        on_event = _progress_callback(progress, _verbosity(bridge, request), written)
         outcome = await bridge.sessions.run_turn(project, request.text, on_event)
     except Exception as exc:  # turn boundary: report every failure to the user
         await _report_failure(bridge, bot, request, progress, exc)
         return
-    await _deliver(bridge, bot, request, progress, outcome)
+    await _deliver(bridge, bot, request, progress, outcome, written.paths)
 
 
 async def _report_failure(
@@ -190,6 +194,7 @@ async def _deliver(
     request: TurnRequest,
     progress: ProgressMessage,
     outcome: TurnOutcome,
+    written: list[str],
 ) -> None:
     answer = compose_answer(outcome)
     text = answer.text
@@ -206,8 +211,10 @@ async def _deliver(
     options = answer.options
     keyboard = choice_keyboard(bridge, request.project, options) if options else None
     await send_text(bot, request.chat_id, text, reply_markup=keyboard)
-    if answer.files:
-        await _deliver_files(bridge, bot, request, answer.files)
+    # Duplicates between the two lists are dropped when the paths are resolved.
+    files = answer.files + written
+    if files:
+        await _deliver_files(bridge, bot, request, files)
 
 
 async def _deliver_files(

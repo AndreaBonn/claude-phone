@@ -1,11 +1,12 @@
 import logging
 from functools import partial
-from pathlib import Path
+from pathlib import Path, PurePath
 from typing import Any
 
 from telegram.error import TelegramError
 
 from src.project_manager import Sandbox, SandboxError
+from src.stream_parser import StreamEvent, ToolResultEvent, ToolUseEvent
 from src.telegram_io import with_retry
 
 logger = logging.getLogger(__name__)
@@ -14,12 +15,56 @@ logger = logging.getLogger(__name__)
 MAX_UPLOAD_BYTES = 50 * 1024 * 1024
 BYTES_PER_MB = 1024 * 1024
 MAX_FILES = 10
+# Files a person opens on a phone; a Write of any other type is ordinary coding work.
+DELIVERABLE_SUFFIXES = frozenset(
+    {
+        ".md",
+        ".txt",
+        ".pdf",
+        ".html",
+        ".htm",
+        ".csv",
+        ".png",
+        ".jpg",
+        ".jpeg",
+        ".gif",
+        ".webp",
+        ".svg",
+        ".docx",
+        ".xlsx",
+        ".pptx",
+    }
+)
 OUTSIDE = "🚫 {raw}: fuori dalle cartelle consentite"
 MISSING = "⚠️ {raw}: file non trovato"
 EMPTY = "⚠️ {raw}: file vuoto, Telegram non lo accetta"
 TOO_LARGE = "⚠️ {raw}: troppo grande per Telegram (limite {limit} MB)"
 OVER_CAP = "⚠️ {count} file non inviati: massimo {cap} per messaggio"
 UPLOAD_FAILED = "⚠️ {name}: invio non riuscito ({error})"
+
+
+class WrittenFiles:
+    """Deliverables created by a successful Write during the current turn.
+
+    Claude does not reliably end its answer with the `[[file: ...]]` lines the
+    system prompt asks for (observed with a user config that prescribes its own
+    closing lines), so the bridge attaches what it saw being written.
+    """
+
+    def __init__(self) -> None:
+        self.paths: list[str] = []
+        self._pending: dict[str, str] = {}
+
+    def observe(self, event: StreamEvent) -> None:
+        if isinstance(event, ToolUseEvent) and event.name == "Write":
+            path = str(event.input.get("file_path", ""))
+            if PurePath(path).suffix.lower() in DELIVERABLE_SUFFIXES:
+                self._pending[event.tool_use_id] = path
+        elif isinstance(event, ToolResultEvent):
+            # A denied or failed Write comes back as an error result: nothing to send.
+            written = self._pending.pop(event.tool_use_id, None)
+            if written is not None and not event.is_error and written not in self.paths:
+                self.paths.append(written)
 
 
 def _check(raw: str, cwd: Path, sandbox: Sandbox) -> Path | str:

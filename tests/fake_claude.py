@@ -75,6 +75,17 @@ def main() -> None:
             time.sleep(60)
         if scenario == "slow":
             time.sleep(0.5)
+        if scenario == "write":
+            # A successful Write of a deliverable, without any [[file: ...]] line.
+            with open("CHI_SONO.md", "w") as handle:
+                handle.write("# Chi sono")
+            tool = {"file_path": "CHI_SONO.md", "content": "# Chi sono"}
+            call = {"type": "tool_use", "id": "w1", "name": "Write", "input": tool}
+            emit({"type": "assistant", "message": {"content": [call]}})
+            done = {"type": "tool_result", "tool_use_id": "w1", "content": "File created"}
+            emit({"type": "user", "message": {"content": [done]}})
+            result(session_id, "Ho creato CHI_SONO.md.")
+            continue
         if scenario == "silent":
             result(session_id, "")
             continue

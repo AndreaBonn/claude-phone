@@ -368,7 +368,9 @@ async def test_a_turn_after_an_interrupted_one_is_not_reported_as_interrupted(
 ) -> None:
     monkeypatch.setenv("FAKE_SCENARIO", "hang")
     turn = asyncio.create_task(harness.manager.run_turn(PROJECT, "hi", harness.on_event))
-    await wait_until(lambda: harness.manager.is_busy(PROJECT), "turn started")
+    # The process must exist: interrupted while spawning, it would stay alive
+    # (with the "hang" scenario) and be reused by the next turn.
+    await wait_until(lambda: harness.manager.is_running(PROJECT), "process started")
     await harness.manager.interrupt(PROJECT)
     await asyncio.gather(turn, return_exceptions=True)
     monkeypatch.setenv("FAKE_SCENARIO", "crash")
@@ -392,4 +394,9 @@ async def test_interrupt_while_the_process_is_still_spawning_stops_the_turn(
     with pytest.raises(TurnInterruptedError):
         await harness.manager.run_turn(PROJECT, "hi", harness.on_event)
     assert stop_results == [True]
+    # The process spawned for the stopped turn stays idle and serves the next one.
+    monkeypatch.setattr(session, "_ensure_started", spawn)
+    outcome = await harness.manager.run_turn(PROJECT, "again", harness.on_event)
+    assert outcome.result.text == "echo: again"
+    assert len(harness.starts()) == 1
     await harness.manager.stop_all()

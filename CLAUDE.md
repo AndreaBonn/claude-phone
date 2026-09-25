@@ -20,7 +20,7 @@ uv run mypy src tests
 - `claude_session.py`: one long-lived `claude -p --input-format stream-json --output-format stream-json` process per project, turns serialized by an `asyncio.Lock`, stderr always drained, idle timeout paused while an approval is pending.
 - Permission gate: `claude` runs `permission_hook.py` (PreToolUse, matcher `*`, injected via `--settings`), which asks `permission_gate.ApprovalBroker` over a 0600 Unix socket. `permission_policy.classify_tool_call` decides allow / ask / block; there is no passthrough, unlisted tools (MCP, WebFetch, NotebookEdit) ask. The user's full config (rules, skills, hooks, plugins, MCP servers) is loaded on purpose: MCP calls ask, and `Sandbox.read_only` exposes the skill/rule/plugin directories of `~/.claude` and of each profile for reading only (`profiles.READABLE_CONFIG_SUBDIRS`).
 - Choice buttons: `AskUserQuestion` does not exist in `-p` mode (measured on Claude Code 2.1.281); `prompts/telegram-bridge-system-v2.md` teaches Claude an `[[option: label]]` line syntax that `message_formatter.extract_choices` turns into buttons.
-- Attachments: the same prompt teaches `[[file: path]]` lines; `file_delivery` resolves them through the gate's `Sandbox` (bridge carved out) and uploads them as documents, 50 MB max each.
+- Attachments: the same prompt teaches `[[file: path]]` lines; `file_delivery` resolves them through the gate's `Sandbox` (bridge carved out) and uploads them as documents, 50 MB max each. `file_delivery.WrittenFiles` also attaches every deliverable (md, pdf, images, csv, html, office) written by a successful `Write` in the turn, because Claude does not reliably emit the lines.
 
 ## Invariants
 
@@ -32,7 +32,7 @@ uv run mypy src tests
 - Sandbox violations are blocked before auto-approval and before asking the user. The sandbox is several roots (`APPROVED_DIRECTORY`, comma-separated) minus `PROJECT_ROOT`: the bridge is always carved out. Project ids are `<root name>/<dir>`; project buttons carry a sha256 prefix because ids overflow the 64-byte callback_data, and the list is paginated (Telegram caps inline keyboards at about 100 buttons).
 - `TELEGRAM_BOT_TOKEN` never reaches the claude child env (`claude_command.SECRET_ENV_VARS`) and is redacted by `logging_setup.SecretRedactingFormatter`, tracebacks included. Config errors are printed through `config.format_config_error`, never `str(ValidationError)`.
 - `permission_hook.py` is stdlib-only and must not import `src`: it runs inside the project directory, not the bridge's.
-- Measured protocol facts: each turn emits one `system/init` and ends with one `result`; `--resume` keeps the session id; a hook reply with `continue: false` ends the turn but keeps the process alive; resuming an unknown session yields a `result` with `num_turns: 0` plus `No conversation found` on stderr, then exit 1.
+- Measured protocol facts: `--resume` keeps the `--append-system-prompt` the session was created with and ignores a new one (Claude Code 2.1.281), so a prompt change reaches only sessions opened after it (`/new`); each turn emits one `system/init` and ends with one `result`; `--resume` keeps the session id; a hook reply with `continue: false` ends the turn but keeps the process alive; resuming an unknown session yields a `result` with `num_turns: 0` plus `No conversation found` on stderr, then exit 1.
 
 ## Claude profiles
 
